@@ -14,6 +14,8 @@ import DashboardPage from './components/pages/DashboardPage';
 import ChatPanel from './components/chat/ChatPanel';
 import ProtectedRoute from './components/auth/ProtectedRoute';
 import MainLayout from './components/layout/MainLayout';
+import { Toaster, toast } from 'sonner';
+import { ConfirmDialog } from './components/ui';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
@@ -65,6 +67,10 @@ function AppContent() {
   const [insights, setInsights] = useState<any>(null);
   const [loadingInsights, setLoadingInsights] = useState(false);
   const [insightsError, setInsightsError] = useState('');
+
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [sessionToDelete, setSessionToDelete] = useState<number | null>(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
 
   const navigate = useNavigate();
 
@@ -123,21 +129,34 @@ function AppContent() {
 
   const deleteSession = async (sessionId: number, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!window.confirm('Delete this historical chat session?')) return;
+    setSessionToDelete(sessionId);
+    setDeleteConfirmOpen(true);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (sessionToDelete === null) return;
+    setDeleteLoading(true);
     try {
-      const res = await fetch(`${API_URL}/chat/sessions/${sessionId}`, {
+      const res = await fetch(`${API_URL}/chat/sessions/${sessionToDelete}`, {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (res.ok) {
-        setSessions(prev => prev.filter(s => s.id !== sessionId));
+        setSessions(prev => prev.filter(s => s.id !== sessionToDelete));
         // Check if the current route matches the deleted session
-        if (window.location.pathname === `/chat/${sessionId}`) {
+        if (window.location.pathname === `/chat/${sessionToDelete}`) {
           navigate('/chat');
         }
+        toast.success('Historical session deleted successfully.');
+      } else {
+        toast.error('Failed to delete chat session.');
       }
     } catch (err) {
-      alert('Network failure deleting session.');
+      toast.error('Network failure deleting session.');
+    } finally {
+      setDeleteLoading(false);
+      setDeleteConfirmOpen(false);
+      setSessionToDelete(null);
     }
   };
 
@@ -151,79 +170,22 @@ function AppContent() {
   };
 
   return (
-    <Routes>
-      <Route
-        path="/login"
-        element={<LoginPage API_URL={API_URL} setToken={setToken} setUser={setUser} />}
-      />
-      <Route
-        path="/register"
-        element={<RegisterPage API_URL={API_URL} setToken={setToken} setUser={setUser} />}
-      />
+    <>
+      <Routes>
+        <Route
+          path="/login"
+          element={<LoginPage API_URL={API_URL} setToken={setToken} setUser={setUser} />}
+        />
+        <Route
+          path="/register"
+          element={<RegisterPage API_URL={API_URL} setToken={setToken} setUser={setUser} />}
+        />
 
-      {/* Protected Routes wrapped in MainLayout */}
-      <Route
-        path="/chat"
-        element={
-          <ProtectedRoute user={user}>
-            <MainLayout
-              user={user}
-              token={token}
-              handleLogout={handleLogout}
-              sessions={sessions}
-              loadingSessions={loadingSessions}
-              deleteSession={deleteSession}
-              showDocViewer={showDocViewer}
-              setShowDocViewer={setShowDocViewer}
-            >
-              <ChatPanel
-                API_URL={API_URL}
-                token={token}
-                user={user}
-                activeSessionId={undefined}
-                setActiveSessionId={(id) => {
-                  if (id) navigate(`/chat/${id}`);
-                  else navigate('/chat');
-                }}
-                fetchSessions={fetchSessions}
-                fetchInsights={fetchInsights}
-              />
-            </MainLayout>
-          </ProtectedRoute>
-        }
-      />
-
-      <Route
-        path="/chat/:chatId"
-        element={
-          <ProtectedRoute user={user}>
-            <MainLayout
-              user={user}
-              token={token}
-              handleLogout={handleLogout}
-              sessions={sessions}
-              loadingSessions={loadingSessions}
-              deleteSession={deleteSession}
-              showDocViewer={showDocViewer}
-              setShowDocViewer={setShowDocViewer}
-            >
-              <ChatPanelWrapper
-                API_URL={API_URL}
-                token={token}
-                user={user}
-                fetchSessions={fetchSessions}
-                fetchInsights={fetchInsights}
-              />
-            </MainLayout>
-          </ProtectedRoute>
-        }
-      />
-
-      <Route
-        path="/dashboard"
-        element={
-          <ProtectedRoute user={user}>
-            {user?.role !== 'customer' ? (
+        {/* Protected Routes wrapped in MainLayout */}
+        <Route
+          path="/chat"
+          element={
+            <ProtectedRoute user={user}>
               <MainLayout
                 user={user}
                 token={token}
@@ -234,28 +196,105 @@ function AppContent() {
                 showDocViewer={showDocViewer}
                 setShowDocViewer={setShowDocViewer}
               >
-                <DashboardPage
-                  insights={insights}
-                  loadingInsights={loadingInsights}
-                  insightsError={insightsError}
+                <ChatPanel
+                  API_URL={API_URL}
+                  token={token}
+                  user={user}
+                  activeSessionId={undefined}
+                  setActiveSessionId={(id) => {
+                    if (id) navigate(`/chat/${id}`);
+                    else navigate('/chat');
+                  }}
+                  fetchSessions={fetchSessions}
                   fetchInsights={fetchInsights}
                 />
               </MainLayout>
-            ) : (
-              <Navigate to="/chat" replace />
-            )}
-          </ProtectedRoute>
-        }
-      />
+            </ProtectedRoute>
+          }
+        />
 
-      <Route path="*" element={<Navigate to="/chat" replace />} />
-    </Routes>
+        <Route
+          path="/chat/:chatId"
+          element={
+            <ProtectedRoute user={user}>
+              <MainLayout
+                user={user}
+                token={token}
+                handleLogout={handleLogout}
+                sessions={sessions}
+                loadingSessions={loadingSessions}
+                deleteSession={deleteSession}
+                showDocViewer={showDocViewer}
+                setShowDocViewer={setShowDocViewer}
+              >
+                <ChatPanelWrapper
+                  API_URL={API_URL}
+                  token={token}
+                  user={user}
+                  fetchSessions={fetchSessions}
+                  fetchInsights={fetchInsights}
+                />
+              </MainLayout>
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/dashboard"
+          element={
+            <ProtectedRoute user={user}>
+              {user?.role !== 'customer' ? (
+                <MainLayout
+                  user={user}
+                  token={token}
+                  handleLogout={handleLogout}
+                  sessions={sessions}
+                  loadingSessions={loadingSessions}
+                  deleteSession={deleteSession}
+                  showDocViewer={showDocViewer}
+                  setShowDocViewer={setShowDocViewer}
+                >
+                  <DashboardPage
+                    insights={insights}
+                    loadingInsights={loadingInsights}
+                    insightsError={insightsError}
+                    fetchInsights={fetchInsights}
+                  />
+                </MainLayout>
+              ) : (
+                <Navigate to="/chat" replace />
+              )}
+            </ProtectedRoute>
+          }
+        />
+
+        <Route path="*" element={<Navigate to="/chat" replace />} />
+      </Routes>
+
+      <ConfirmDialog
+        open={deleteConfirmOpen}
+        onClose={() => {
+          if (!deleteLoading) {
+            setDeleteConfirmOpen(false);
+            setSessionToDelete(null);
+          }
+        }}
+        onConfirm={handleConfirmDelete}
+        title="Delete Session"
+        description="Are you sure you want to delete this historical chat session?"
+        confirmLabel="Yes, Delete"
+        cancelLabel="No, Cancel"
+        variant="danger"
+        loading={deleteLoading}
+      />
+    </>
   );
 }
 
 export default function App() {
   return (
     <Router>
+      <Toaster position="top-right" richColors closeButton />
       <AppContent />
     </Router>
   );

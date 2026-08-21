@@ -1,5 +1,11 @@
 import os
 from datetime import datetime, timezone, timedelta
+from dotenv import load_dotenv
+
+# Locate and load the .env file from the project root
+config_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(os.path.dirname(config_dir))
+load_dotenv(os.path.join(project_root, ".env"))
 
 # Database Configuration
 DATABASE_URL = os.getenv(

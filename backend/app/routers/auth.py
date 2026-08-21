@@ -12,6 +12,20 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 @router.post("/register")
 def register_user(req: RegisterRequest, db: Session = Depends(get_db)):
+    """Registers a new system user.
+
+    Enforces email uniqueness before hashing the passwords using bcrypt.
+
+    Args:
+        req: RegisterRequest schema containing email, password, full name, role, and optional account scope.
+        db: Database session.
+
+    Returns:
+        dict: A dictionary containing registration success status, user_id, email, role, and full_name.
+
+    Raises:
+        HTTPException: 400 Bad Request if the email is already registered.
+    """
     existing = db.query(User).filter(User.email == req.email.strip()).first()
     if existing:
         raise HTTPException(
@@ -44,6 +58,20 @@ def register_user(req: RegisterRequest, db: Session = Depends(get_db)):
 
 @router.post("/mock-login")
 def mock_login(req: LoginRequest, db: Session = Depends(get_db)):
+    """Logs in an existing user using bcrypt password validation.
+
+    Generates a secure JWT access token upon successful authentication.
+
+    Args:
+        req: LoginRequest schema containing credentials (email, password).
+        db: Database session.
+
+    Returns:
+        dict: A dictionary containing the JWT access token and logged-in user profile details.
+
+    Raises:
+        HTTPException: 401 Unauthorized if verification fails or the user does not exist.
+    """
     user = db.query(User).filter(User.email == req.email.strip()).first()
     if not user:
         raise HTTPException(

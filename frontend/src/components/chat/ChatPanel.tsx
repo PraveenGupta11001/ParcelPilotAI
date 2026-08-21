@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { Shield, Send, RefreshCw, FileText, ChevronDown, ChevronUp, Activity, Check, Copy } from 'lucide-react';
-import { Button, TextInput, EmptyState } from '../ui';
+import { Button, TextInput, EmptyState, ConfirmDialog } from '../ui';
+import { toast } from 'sonner';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 interface Message {
     id: string;
@@ -22,6 +24,46 @@ interface ChatPanelProps {
     fetchInsights: () => void;
 }
 
+const renderMarkdown = (text: string) => {
+    return (
+        <ReactMarkdown
+            remarkPlugins={[remarkGfm]}
+            components={{
+                p: ({ children }) => <p className="mb-2 last:mb-0" style={{ wordBreak: 'break-word' }}>{children}</p>,
+                a: ({ href, children }) => <a href={href} target="_blank" rel="noopener noreferrer" className="text-emerald-600 hover:text-emerald-700 underline font-semibold">{children}</a>,
+                strong: ({ children }) => <strong className="font-extrabold text-slate-900">{children}</strong>,
+                em: ({ children }) => <em className="italic">{children}</em>,
+                code({ node, inline, className, children, ...props }: any) {
+                    return inline ? (
+                        <code className="bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded font-mono text-xs text-rose-600 font-semibold" {...props}>
+                            {children}
+                        </code>
+                    ) : (
+                        <pre className="bg-slate-900 text-slate-100 p-3.5 my-3 rounded-xl font-mono text-xs overflow-x-auto border border-slate-800" {...props}>
+                            <code>{children}</code>
+                        </pre>
+                    );
+                },
+                table: ({ children }) => <div className="overflow-x-auto my-3 border border-slate-205 rounded-xl"><table className="min-w-full divide-y divide-slate-200 border-collapse bg-white">{children}</table></div>,
+                thead: ({ children }) => <thead className="bg-slate-50">{children}</thead>,
+                tbody: ({ children }) => <tbody className="divide-y divide-slate-100 bg-white">{children}</tbody>,
+                tr: ({ children }) => <tr>{children}</tr>,
+                th: ({ children }) => <th className="px-4 py-2 bg-slate-50 text-left text-xs font-bold uppercase tracking-wider text-slate-550 border-b border-slate-200">{children}</th>,
+                td: ({ children }) => <td className="px-4 py-2 text-xs text-slate-700 border-b border-slate-100 font-medium">{children}</td>,
+                ul: ({ children }) => <ul className="list-disc pl-5 my-2 space-y-1.5 text-sm">{children}</ul>,
+                ol: ({ children }) => <ol className="list-decimal pl-5 my-2 space-y-1.5 text-sm">{children}</ol>,
+                li: ({ children }) => <li className="text-slate-750 font-medium list-item">{children}</li>,
+                blockquote: ({ children }) => <blockquote className="border-l-4 border-emerald-500 pl-4 py-1 my-3 bg-slate-50/50 rounded-r text-slate-655 italic">{children}</blockquote>,
+                h1: ({ children }) => <h1 className="text-lg font-black text-slate-900 mt-4 mb-2 tracking-tight">{children}</h1>,
+                h2: ({ children }) => <h2 className="text-base font-extrabold text-slate-950 mt-3 mb-2 tracking-tight">{children}</h2>,
+                h3: ({ children }) => <h3 className="text-sm font-bold text-slate-800 mt-2.5 mb-1.5">{children}</h3>,
+            }}
+        >
+            {text}
+        </ReactMarkdown>
+    );
+};
+
 export default function ChatPanel({
     API_URL,
     token,
@@ -34,13 +76,21 @@ export default function ChatPanel({
     const [messages, setMessages] = useState<Message[]>([]);
     const [inputMessage, setInputMessage] = useState('');
     const [loadingChat, setLoadingChat] = useState(false);
+    const [reasoningStatus, setReasoningStatus] = useState<string>('');
+    const [liveToolCalls, setLiveToolCalls] = useState<any[]>([]);
     const scrollRef = useRef<HTMLDivElement>(null);
-    const navigate = useNavigate();
 
     // Expandable trace states
     const [expandedTrace, setExpandedTrace] = useState<Record<string, boolean>>({});
     const [expandedSection, setExpandedSection] = useState<Record<string, boolean>>({});
     const [copiedId, setCopiedId] = useState<string | null>(null);
+
+    // Confirm dialog modal states
+    const [confirmOpen, setConfirmOpen] = useState(false);
+    const [confirmProposalId, setConfirmProposalId] = useState<number | null>(null);
+    const [confirmMsgId, setConfirmMsgId] = useState<string | null>(null);
+    const [confirmActionType, setConfirmActionType] = useState('');
+    const [confirmLoading, setConfirmLoading] = useState(false);
 
     // Auto-scroll chat
     useEffect(() => {
@@ -103,6 +153,8 @@ export default function ChatPanel({
 
         setMessages(prev => [...prev, userMsg]);
         setLoadingChat(true);
+        setReasoningStatus('Initializing assistant request...');
+        setLiveToolCalls([]);
 
         try {
             const formattedHistory = messages.map(m => ({
@@ -119,48 +171,92 @@ export default function ChatPanel({
                 body: JSON.stringify({
                     message: userText,
                     chat_history: formattedHistory,
-                    session_id: activeSessionId ? parseInt(activeSessionId) : null
+                    session_id: activeSessionId ? parseInt(activeSessionId) : null,
+                    stream: true
                 })
             });
 
             if (res.ok) {
-                const data = await res.json();
-
-                // If let the backend auto-create session or we had no active session ID
-                if (!activeSessionId && data.session_id) {
-                    setActiveSessionId(data.session_id.toString());
-                    navigate(`/chat/${data.session_id}`);
-                    fetchSessions();
-                }
+                const reader = res.body?.getReader();
+                const decoder = new TextDecoder();
+                let buffer = '';
 
                 const assistantMsgId = Math.random().toString();
                 const assistantMsg: Message = {
                     id: assistantMsgId,
                     role: 'assistant',
                     content: '',
-                    tool_calls: data.tool_calls
+                    tool_calls: []
                 };
                 setMessages(prev => [...prev, assistantMsg]);
 
-                // Streaming Typewriter effect simulation
-                const responseText = data.text_response || '';
-                const words = responseText.split(' ');
-                let wordIndex = 0;
-                let currentText = '';
+                if (reader) {
+                    while (true) {
+                        const { value, done } = await reader.read();
+                        if (done) break;
 
-                const timer = setInterval(() => {
-                    if (wordIndex < words.length) {
-                        currentText += (wordIndex === 0 ? '' : ' ') + words[wordIndex];
-                        setMessages(prev => prev.map(m => m.id === assistantMsgId ? { ...m, content: currentText } : m));
-                        wordIndex++;
-                    } else {
-                        clearInterval(timer);
-                        setLoadingChat(false);
-                        if (user && user.role !== 'customer') {
-                            fetchInsights();
+                        buffer += decoder.decode(value, { stream: true });
+                        const lines = buffer.split('\n');
+                        buffer = lines.pop() || '';
+
+                        for (const line of lines) {
+                            const trimmed = line.trim();
+                            if (!trimmed.startsWith('data: ')) continue;
+
+                            try {
+                                const jsonStr = trimmed.substring(6);
+                                const parsed = JSON.parse(jsonStr);
+
+                                if (parsed.event === 'session_created') {
+                                    const newSId = parsed.session_id.toString();
+                                    setActiveSessionId(newSId);
+                                    window.history.pushState(null, '', `/chat/${newSId}`);
+                                    fetchSessions();
+                                } else if (parsed.event === 'status') {
+                                    setReasoningStatus(parsed.message);
+                                } else if (parsed.event === 'tool_call') {
+                                    setReasoningStatus(`Executing ${parsed.name}...`);
+                                    setLiveToolCalls(prev => {
+                                        if (prev.some(tc => tc.tool_name === parsed.name && JSON.stringify(tc.args) === JSON.stringify(parsed.args))) {
+                                            return prev;
+                                        }
+                                        return [...prev, {
+                                            tool_name: parsed.name,
+                                            args: parsed.args,
+                                            output: 'running...'
+                                        }];
+                                    });
+                                } else if (parsed.event === 'tool_result') {
+                                    setReasoningStatus(`Completed ${parsed.name} execution`);
+                                    setLiveToolCalls(prev => prev.map(tc =>
+                                        tc.tool_name === parsed.name ? { ...tc, output: parsed.output } : tc
+                                    ));
+                                } else if (parsed.event === 'text') {
+                                    setMessages(prev => prev.map(m =>
+                                        m.id === assistantMsgId ? { ...m, content: parsed.text } : m
+                                    ));
+                                } else if (parsed.event === 'done') {
+                                    setMessages(prev => prev.map(m =>
+                                        m.id === assistantMsgId ? {
+                                            ...m,
+                                            content: parsed.text_response,
+                                            tool_calls: parsed.tool_calls
+                                        } : m
+                                    ));
+                                }
+                            } catch (e) {
+                                console.error('Failed to parse SSE JSON chunk', e);
+                            }
                         }
                     }
-                }, 35);
+                }
+
+                setLoadingChat(false);
+                setReasoningStatus('');
+                setLiveToolCalls([]);
+                if (user && user.role !== 'customer') {
+                    fetchInsights();
+                }
 
             } else {
                 setMessages(prev => [...prev, {
@@ -181,6 +277,7 @@ export default function ChatPanel({
     };
 
     const handleConfirmAction = async (proposalId: number, msgId: string) => {
+        setConfirmLoading(true);
         try {
             const res = await fetch(`${API_URL}/chat/confirm`, {
                 method: 'POST',
@@ -193,6 +290,7 @@ export default function ChatPanel({
 
             if (res.ok) {
                 const data = await res.json();
+                toast.success(data.message || `Successfully executed proposal #${proposalId}`);
 
                 setMessages(prev => prev.map(m => {
                     if (m.id === msgId && m.tool_calls) {
@@ -218,12 +316,15 @@ export default function ChatPanel({
                 if (user && user.role !== 'customer') {
                     fetchInsights();
                 }
+                setConfirmOpen(false);
             } else {
                 const err = await res.json();
-                alert(`Failed to confirm proposal: ${err.detail}`);
+                toast.error(err.detail || 'Failed to confirm proposal.');
             }
         } catch (e) {
-            alert('Internal connection error during confirmation stage.');
+            toast.error('Internal connection error during confirmation stage.');
+        } finally {
+            setConfirmLoading(false);
         }
     };
 
@@ -254,29 +355,45 @@ export default function ChatPanel({
                         >
                             <div
                                 className={`px-4 py-3.5 rounded-2xl text-base leading-relaxed ${m.role === 'user'
-                                    ? 'bg-emerald-650 text-white font-bold rounded-tr-none'
+                                    ? 'bg-emerald-650 text-slate-800 font-bold rounded-tr-none'
                                     : 'bg-slate-50 border border-border text-slate-800 rounded-tl-none shadow-sm'
                                     }`}
                             >
                                 {/* Copy to Clipboard button float */}
-                                <button
-                                    onClick={() => handleCopy(m.id, msgText)}
-                                    className={`absolute top-2.5 right-2 opacity-0 group-hover:opacity-100 transition-opacity p-1 bg-white hover:bg-slate-100 border border-border rounded-lg cursor-pointer ${m.role === 'user' ? 'text-slate-800 border-none' : 'text-slate-500'}`}
-                                    title="Copy message to clipboard"
-                                >
-                                    {copiedId === m.id ? (
-                                        <Check className="h-3 w-3 text-emerald-600" />
-                                    ) : (
-                                        <Copy className="h-3 w-3" />
-                                    )}
-                                </button>
+                                {msgText.trim() && (
+                                    <button
+                                        onClick={() => handleCopy(m.id, msgText)}
+                                        className={`absolute top-2.5 right-2 opacity-0 group-hover:opacity-100 transition-opacity p-1 bg-white hover:bg-slate-100 border border-border rounded-lg cursor-pointer ${m.role === 'user' ? 'text-slate-800 border-none' : 'text-slate-500'}`}
+                                        title="Copy message to clipboard"
+                                    >
+                                        {copiedId === m.id ? (
+                                            <Check className="h-3 w-3 text-emerald-600" />
+                                        ) : (
+                                            <Copy className="h-3 w-3" />
+                                        )}
+                                    </button>
+                                )}
 
-                                {/* Handle lines */}
-                                {msgText.split('\n').map((para, i) => (
-                                    <p key={i} className={para.trim() ? "mb-2 last:mb-0" : "h-2"} style={{ wordBreak: 'break-word' }}>
-                                        {para}
-                                    </p>
-                                ))}
+                                {m.role === 'user' ? (
+                                    <div className="whitespace-pre-wrap font-medium" style={{ wordBreak: 'break-word' }}>
+                                        {msgText}
+                                    </div>
+                                ) : msgText.trim() ? (
+                                    renderMarkdown(msgText)
+                                ) : hasCitations ? (
+                                    <div className="text-sm font-semibold text-slate-500 italic flex items-center gap-1.5 py-1">
+                                        <FileText className="h-4 w-4 animate-pulse text-emerald-600" />
+                                        <span>Retrieved the following matching policy reference documents:</span>
+                                    </div>
+                                ) : hasConfirmations ? (
+                                    <div className="text-sm font-semibold text-slate-500 italic flex items-center gap-1.5 py-1">
+                                        <span>Proposed a calculated transaction action:</span>
+                                    </div>
+                                ) : (
+                                    <div className="text-sm font-semibold text-slate-500 italic flex items-center gap-1.5 py-1">
+                                        <span>AI agent processed calculations / systems lookups:</span>
+                                    </div>
+                                )}
                             </div>
 
                             {/* Citations/Traces */}
@@ -285,8 +402,18 @@ export default function ChatPanel({
                                     {/* Render Confirmations proposal cards */}
                                     {hasConfirmations && m.tool_calls?.map((tc, idx) => {
                                         if (tc.tool_name === 'propose_action') {
-                                            const parsed = JSON.parse(tc.output);
-                                            if (parsed.error) return null;
+                                            let parsed: any = null;
+                                            try {
+                                                if (typeof tc.output === 'string') {
+                                                    parsed = JSON.parse(tc.output);
+                                                } else {
+                                                    parsed = tc.output;
+                                                }
+                                            } catch (e) {
+                                                console.error('Failed to parse propose_action output', e);
+                                                return null;
+                                            }
+                                            if (!parsed || parsed.error) return null;
 
                                             const isPending = parsed.status === 'PENDING';
                                             const isApproved = parsed.status === 'APPROVED';
@@ -337,14 +464,19 @@ export default function ChatPanel({
                                                     {isPending && (
                                                         <div className="flex gap-2 pt-2">
                                                             <button
-                                                                onClick={() => handleConfirmAction(parsed.proposal_id, m.id)}
+                                                                onClick={() => {
+                                                                    setConfirmProposalId(parsed.proposal_id);
+                                                                    setConfirmMsgId(m.id);
+                                                                    setConfirmActionType(parsed.action_type || 'Action');
+                                                                    setConfirmOpen(true);
+                                                                }}
                                                                 className="flex-1 py-1.5 bg-emerald-650 text-white font-bold text-xs rounded hover:bg-emerald-700 transition-colors cursor-pointer"
                                                             >
                                                                 Confirm Action
                                                             </button>
                                                             <button
                                                                 onClick={() => {
-                                                                    alert('Proposal rejected locally.');
+                                                                    toast.info('Proposal rejected locally.');
                                                                 }}
                                                                 className="px-3 py-1.5 bg-white border border-border text-slate-600 hover:text-slate-900 text-xs rounded transition-colors cursor-pointer"
                                                             >
@@ -363,7 +495,11 @@ export default function ChatPanel({
                                         if (tc.tool_name === 'search_documents') {
                                             let parsed = [];
                                             try {
-                                                parsed = JSON.parse(tc.output);
+                                                if (typeof tc.output === 'string') {
+                                                    parsed = JSON.parse(tc.output);
+                                                } else {
+                                                    parsed = tc.output || [];
+                                                }
                                             } catch (e) { return null; }
 
                                             if ((parsed as any).error || !parsed.length) return null;
@@ -423,7 +559,9 @@ export default function ChatPanel({
                                                             <div className="text-emerald-700 font-bold">🔧 {tc.tool_name}()</div>
                                                             <div className="pl-3 text-slate-500">INPUT: {JSON.stringify(tc.args)}</div>
                                                             <div className="pl-3 text-slate-700">
-                                                                OUTPUT: {tc.output.length > 250 ? tc.output.substring(0, 250) + '...' : tc.output}
+                                                                OUTPUT: {typeof tc.output === 'string'
+                                                                    ? (tc.output.length > 250 ? tc.output.substring(0, 250) + '...' : tc.output)
+                                                                    : (JSON.stringify(tc.output).length > 250 ? JSON.stringify(tc.output).substring(0, 250) + '...' : JSON.stringify(tc.output))}
                                                             </div>
                                                             {tcIdx < m.tool_calls!.length - 1 && <div className="border-t border-border/50 my-2"></div>}
                                                         </div>
@@ -438,10 +576,41 @@ export default function ChatPanel({
                     );
                 })}
 
-                {loadingChat && messages.length > 0 && (
-                    <div className="flex items-center space-x-2 text-xs text-slate-600 font-semibold pl-4 py-2">
-                        <RefreshCw className="h-3.5 w-3.5 animate-spin text-emerald-600" />
-                        <span>AI Agent reasoning & searching database...</span>
+                {loadingChat && (
+                    <div className="pl-4 py-2.5 pr-2.5 mx-4 my-2 shrink-0 border border-slate-100 bg-slate-50/50 rounded-xl space-y-2.5 transition-all duration-300">
+                        <div className="flex items-center space-x-2 text-xs font-semibold text-emerald-800">
+                            <RefreshCw className="h-3.5 w-3.5 animate-spin text-emerald-600 font-extrabold" />
+                            <span>{reasoningStatus || 'Analyzing search metrics & database status...'}</span>
+                        </div>
+                        {liveToolCalls.length > 0 && (
+                            <div className="space-y-2 pl-5">
+                                <div className="text-[10px] uppercase font-bold text-slate-400 font-sans tracking-wide">Live Tool Executions:</div>
+                                {liveToolCalls.map((tc, idx) => (
+                                    <div key={idx} className="flex flex-col text-[11px] font-mono text-slate-650 bg-white p-2.5 rounded-lg border border-border shadow-sm animate-fade-in">
+                                        <div className="flex items-center justify-between font-bold text-slate-705">
+                                            <span className="flex items-center space-x-1.5">
+                                                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-ping"></span>
+                                                <span className="text-emerald-700">🔧 {tc.tool_name}()</span>
+                                            </span>
+                                            {tc.output === 'running...' ? (
+                                                <span className="text-[9px] font-bold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200">RUNNING</span>
+                                            ) : (
+                                                <span className="text-[9px] font-bold text-emerald-700 bg-green-50 px-1.5 py-0.5 rounded border border-green-200">COMPLETED</span>
+                                            )}
+                                        </div>
+                                        <div className="text-[10px] text-slate-400 mt-1 font-medium select-all">Args: {JSON.stringify(tc.args)}</div>
+                                        {tc.output !== 'running...' && (
+                                            <div className="text-[10px] text-slate-500 mt-1 italic border-t border-slate-50 pt-1">
+                                                Output: {typeof tc.output === 'string'
+                                                    ? (tc.output.length > 80 ? tc.output.substring(0, 80) + '...' : tc.output)
+                                                    : (JSON.stringify(tc.output).length > 80 ? JSON.stringify(tc.output).substring(0, 80) + '...' : JSON.stringify(tc.output))
+                                                }
+                                            </div>
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
+                        )}
                     </div>
                 )}
                 <div ref={scrollRef}></div>
@@ -466,9 +635,25 @@ export default function ChatPanel({
                     size="icon"
                     className="h-11 w-11 shrink-0 bg-emerald-650 hover:bg-emerald-700 text-white flex items-center justify-center rounded-xl"
                 >
-                    <Send className="h-4 w-4" />
+                    <Send className="h-4 w-4 text-emerald-600 font-bold" />
                 </Button>
             </form>
+
+            <ConfirmDialog
+                open={confirmOpen}
+                onClose={() => setConfirmOpen(false)}
+                onConfirm={() => {
+                    if (confirmProposalId !== null && confirmMsgId !== null) {
+                        handleConfirmAction(confirmProposalId, confirmMsgId);
+                    }
+                }}
+                title="Confirm Proposal Execution"
+                description={`Are you sure you want to finalize and execute the proposed ${confirmActionType.replace(/_/g, ' ')} for proposal #${confirmProposalId}? This action will permanently mutate backend records.`}
+                confirmLabel="Execute Action"
+                cancelLabel="Cancel"
+                variant="success"
+                loading={confirmLoading}
+            />
         </div>
     );
 }

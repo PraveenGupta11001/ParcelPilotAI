@@ -1,5 +1,6 @@
 import json
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from typing import List, Optional
 
@@ -18,6 +19,22 @@ def chat(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
+    """Processes a conversational user message through the AI agent loop.
+
+    Creates/initializes a new chat session if session_id is omitted. Appends messages
+    to history before running the agent orchestrator.
+
+    Args:
+        req: ChatRequest schema containing message description and history list.
+        current_user: Authenticated caller user object.
+        db: Database session.
+
+    Returns:
+        dict: A dictionary containing the text response, tool calls list, and session_id.
+
+    Raises:
+        HTTPException: 404 if the session ID is not found, or 403 authorization violation.
+    """
     session_id = req.session_id
     
     if session_id:
@@ -65,12 +82,61 @@ def chat(
                 "role": role,
                 "content": m.text
             })
-
     session.updated_at = SNAPSHOT_DATETIME
+    db.commit()
 
+    if req.stream:
+        # Capture critical user state parameters before the API session expires
+        caller_user_id = current_user.user_id
+        
+        def stream_generator():
+            from app.db.session import SessionLocal
+            gen_db = SessionLocal()
+            try:
+                # Retrieve a fresh user instance tied to this generator's session context
+                fresh_user = gen_db.query(User).filter(User.user_id == caller_user_id).first()
+                if not fresh_user:
+                    return
+
+                stream_agent = AgentService(gen_db, fresh_user)
+                if not req.session_id:
+                    yield f"data: {json.dumps({'event': 'session_created', 'session_id': session_id})}\n\n"
+                
+                final_text = ""
+                for step in stream_agent.run_agent_stream(history_list, req.message):
+                    yield f"data: {json.dumps(step)}\n\n"
+                    if step.get("event") == "done":
+                        final_text = step.get("text_response", "")
+
+                # Save response to history
+                tool_calls_str = json.dumps(stream_agent.trace) if stream_agent.trace else None
+                bot_msg_db = ChatMessage(
+                    session_id=session_id,
+                    sender="bot",
+                    text=final_text,
+                    tool_calls=tool_calls_str,
+                    created_at=SNAPSHOT_DATETIME
+                )
+                gen_db.add(bot_msg_db)
+                
+                # Fetch and update active chat session
+                db_session = gen_db.query(ChatSession).filter(ChatSession.id == session_id).first()
+                if db_session:
+                    db_session.updated_at = SNAPSHOT_DATETIME
+                gen_db.commit()
+            except Exception as e:
+                yield f"data: {json.dumps({'event': 'status', 'message': f'Internal agent error: {str(e)}'})}\n\n"
+            finally:
+                gen_db.close()
+
+        return StreamingResponse(
+            stream_generator(),
+            media_type="text/event-stream"
+        )
+
+    # Synchronous non-streaming path
     agent = AgentService(db, current_user)
     result = agent.run_agent_loop(history_list, req.message)
-
     tool_calls_str = json.dumps(result.get("tool_calls")) if result.get("tool_calls") else None
     bot_msg_db = ChatMessage(
         session_id=session_id,
@@ -87,14 +153,29 @@ def chat(
         "tool_calls": result.get("tool_calls"),
         "session_id": session_id
     }
-
-
 @router.post("/confirm")
 def chat_confirm(
     req: ConfirmRequest,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
+    """Finalizes and executes a proposed pending customer support action.
+
+    Validates user scopes and manager verification constraints on credit transfers.
+    Updates DB states for orders, tickets, and escalations accordingly.
+
+    Args:
+        req: ConfirmRequest schema enclosing the target proposal_id.
+        current_user: Authenticated caller.
+        db: Database session.
+
+    Returns:
+        dict: Confirmation status, completion description string, and completed action fields.
+
+    Raises:
+        HTTPException: 404 if the proposal ID does not exist, 400 if already processed, and
+                       403/Forbidden if security bounds and lead credit permissions check fail.
+    """
     action = db.query(PendingAction).filter(PendingAction.id == req.proposal_id).first()
     if not action:
         raise HTTPException(
@@ -193,6 +274,15 @@ def get_sessions(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
+    """Retrieves all chat sessions initiated by the authenticated user.
+
+    Args:
+        current_user: Authenticated caller.
+        db: Database session.
+
+    Returns:
+        list: A list of serialized chat session dictionaries ordered by last update.
+    """
     sessions = db.query(ChatSession).filter(ChatSession.user_id == current_user.user_id).order_by(ChatSession.updated_at.desc()).all()
     return [
         {
@@ -212,6 +302,16 @@ def create_session(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
+    """Creates a new empty chat session with a custom user-defined title.
+
+    Args:
+        req: CreateSessionRequest containing the new session title.
+        current_user: Authenticated user.
+        db: Database session.
+
+    Returns:
+        dict: The created chat session record attributes.
+    """
     session = ChatSession(
         user_id=current_user.user_id,
         title=req.title,
@@ -236,6 +336,21 @@ def delete_session(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
+    """Deletes a specified chat session.
+
+    Enforces ownership permissions check (customers may only delete their own sessions).
+
+    Args:
+        session_id: Numeric session ID.
+        current_user: Authenticated caller.
+        db: Database session.
+
+    Returns:
+        dict: A success message status payload.
+
+    Raises:
+        HTTPException: 404 if not found, 403 if user lacks access rights.
+    """
     session = db.query(ChatSession).filter(ChatSession.id == session_id).first()
     if not session:
         raise HTTPException(status_code=404, detail="Chat session not found.")
@@ -254,6 +369,19 @@ def get_session_messages(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
+    """Returns the message history list for a specified chat session.
+
+    Args:
+        session_id: Numeric session ID.
+        current_user: Authenticated caller.
+        db: Database session.
+
+    Returns:
+        list: Messages containing sender tags, text value, tool calls trace, and timestamps.
+
+    Raises:
+        HTTPException: 404 if not found, 403 if unauthorized.
+    """
     session = db.query(ChatSession).filter(ChatSession.id == session_id).first()
     if not session:
         raise HTTPException(status_code=404, detail="Chat session not found.")

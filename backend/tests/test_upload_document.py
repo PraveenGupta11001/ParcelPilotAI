@@ -32,3 +32,25 @@ def test_upload_unsupported_file_type(client):
     response = client.post("/upload-document", files=files, headers=headers)
     assert response.status_code == 400
     assert "Unsupported file format" in response.json()["detail"]
+
+
+def test_download_document_not_found(client):
+    headers = _get_auth_headers(client)
+    response = client.get("/uploaded-documents/nonexistent_document.pdf/download", headers=headers)
+    assert response.status_code == 404
+    assert "Document metadata not found" in response.json()["detail"]
+
+
+def test_download_text_only_document_fails(client, db_session):
+    headers = _get_auth_headers(client)
+    # First ingest a text document (which creates it in DB but doesn't save to physical Data folder)
+    file_content = b"Some random content."
+    files = {"file": ("test_only_text_doc.txt", file_content, "text/plain")}
+    response = client.post("/upload-document", files=files, headers=headers)
+    assert response.status_code == 200
+
+    # Try downloading it (since it's not saved physically in Data/ folder, should return 404 physical file not available)
+    response = client.get("/uploaded-documents/test_only_text_doc.txt/download", headers=headers)
+    assert response.status_code == 404
+    assert "Physical PDF file is not available" in response.json()["detail"]
+

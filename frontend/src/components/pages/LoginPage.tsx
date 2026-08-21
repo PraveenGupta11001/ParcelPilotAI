@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import paypilotLogo from '../../assets/paypilot_logo.svg';
+import parcelPilotLogo from '../../assets/ParcelPilotLogo.png';
 import { Button, TextInput } from '../ui';
 
 interface LoginPageProps {
@@ -59,7 +59,7 @@ export default function LoginPage({ API_URL, setToken, setUser }: LoginPageProps
 
     return (
         <div className="min-h-screen flex flex-col items-center justify-center p-4 bg-login-bg text-foreground font-sans z-10">
-            <img src={paypilotLogo} alt="PayPilot AI" className="w-16 h-16 mb-4" />
+            <img src={parcelPilotLogo} alt="ParcelPilot AI" className="w-16 h-16 mb-4 rounded-full shadow-lg" />
             <div className="w-full max-w-md bg-white border border-border rounded-2xl shadow-xl p-8 relative z-10">
 
                 <h2 className="text-2xl font-black text-center tracking-tight mb-1 text-slate-800">ParcelPilot Support</h2>

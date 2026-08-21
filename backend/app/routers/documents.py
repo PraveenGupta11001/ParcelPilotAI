@@ -14,6 +14,16 @@ router = APIRouter(tags=["documents"])
 
 # Helper function to parse DOCX in pure python
 def extract_docx_text(file_bytes) -> str:
+    """Extracts raw text content from DOCX file bytes in pure Python.
+
+    Parses the Word document XML structure and extracts paragraph/run segments.
+
+    Args:
+        file_bytes: Unprocessed binary DOCX data payload.
+
+    Returns:
+        str: Flattened paragraph elements separated by newlines, or empty string on error.
+    """
     try:
         from io import BytesIO
         import zipfile
@@ -42,6 +52,24 @@ def upload_document(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
+    """Ingests a policy or contract document (PDF, DOCX, TXT, MD) into the RAG system.
+
+    Determines valid tenant storage scope context, extracts textual content,
+    splits it into overlapping chunks, generates embedding vectors, and commits records.
+
+    Args:
+        file: Multipart uploaded document file handle.
+        scope: Optional scope override (e.g. 'general' or specific tenant ACCT-ID).
+        current_user: Authenticated caller user object.
+        db: Database session.
+
+    Returns:
+        dict: A status dict including filename, chunks count, scope and summary message.
+
+    Raises:
+        HTTPException: 400 Bad Request for parsing errors, empty files, or unsupported formats.
+                       403 Forbidden if a customer lacks account assignment.
+    """
     target_scope = "general"
     if current_user.role == "customer":
         if not current_user.account_id:
@@ -118,6 +146,17 @@ def list_uploaded_documents(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
+    """Lists unique filenames and scope keys of ingested documents within current scope.
+
+    Customers are restricted to viewing documents under general or their own account scopes.
+
+    Args:
+        current_user: Authenticated user database model.
+        db: Database Session.
+
+    Returns:
+        list: Distinct dictionaries listing filename and scope.
+    """
     query = db.query(DocumentChunk.document_name, DocumentChunk.scope).distinct()
     if current_user.role == "customer":
         query = query.filter(DocumentChunk.scope.in_(["general", current_user.account_id]))
@@ -137,6 +176,21 @@ def get_uploaded_document_content(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
+    """Retrieves metadata and full concatenated text content of a specified document.
+
+    Enforces customer isolation checks based on assigned account scope.
+
+    Args:
+        filename: Target document filename.
+        current_user: Authenticated user session.
+        db: Database session connection.
+
+    Returns:
+        dict: Document info enlisting filename, scope, status, full content, and chunks.
+
+    Raises:
+        HTTPException: 404 if the document is not found, 403 if security scope validation fails.
+    """
     chunks = db.query(DocumentChunk).filter(DocumentChunk.document_name == filename).order_by(DocumentChunk.chunk_index.asc()).all()
     if not chunks:
         raise HTTPException(status_code=404, detail="Document not found.")
@@ -154,3 +208,37 @@ def get_uploaded_document_content(
         "content": "\n\n".join([c.content for c in chunks]),
         "chunks": [{"index": c.chunk_index, "content": c.content} for c in chunks]
     }
+
+@router.get("/uploaded-documents/{filename}/download")
+def download_document(
+    filename: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    import os
+    from fastapi.responses import FileResponse
+
+    # Security check: if current_user.role is customer, check if document scope is accessible.
+    chunks = db.query(DocumentChunk).filter(DocumentChunk.document_name == filename).all()
+    if not chunks:
+        raise HTTPException(status_code=404, detail="Document metadata not found in system.")
+        
+    for c in chunks:
+        if current_user.role == "customer" and c.scope not in ["general", current_user.account_id]:
+            raise HTTPException(status_code=403, detail="Access denied: Not authorized to access this document.")
+
+    # Locate page in Data directory
+    data_dir = "/home/praveen/my_projects/ParcelPilot_Customer_Support/Data"
+    file_path = os.path.join(data_dir, filename)
+    
+    if os.path.exists(file_path):
+        return FileResponse(
+            path=file_path,
+            filename=filename,
+            media_type="application/pdf" if filename.endswith(".pdf") else "application/octet-stream"
+        )
+    else:
+        raise HTTPException(
+            status_code=404, 
+            detail="Physical PDF file is not available on server disk. This document is text-only."
+        )

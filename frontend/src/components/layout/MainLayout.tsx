@@ -12,6 +12,7 @@ import {
     MessageSquare
 } from 'lucide-react';
 import DocumentViewer from '../chat/DocumentViewer';
+import parcelPilotLogo from '../../assets/ParcelPilotLogo.png';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
@@ -45,12 +46,7 @@ interface MainLayoutProps {
 
 function ParcelPilotLogo({ className = "h-5 w-5" }: { className?: string }) {
     return (
-        <svg className={className} viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path d="M12 2L2 7L12 12L22 7L12 2Z" stroke="#10b981" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-            <path d="M2 17L12 22L22 17" stroke="#10b981" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-            <path d="M2 12L12 17L22 12" stroke="#10b981" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-            <path d="M12 12V22" stroke="#10b981" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
+        <img src={parcelPilotLogo} alt="ParcelPilot AI Logo" className={className} />
     );
 }
 
@@ -81,9 +77,7 @@ export default function MainLayout({
             >
                 {/* Sidebar Header */}
                 <div className="p-5 border-b border-border flex items-center space-x-3 bg-white">
-                    <div className="w-8 h-8 rounded bg-emerald-50 flex items-center justify-center border border-emerald-100 shadow-sm shadow-emerald-500/10">
-                        <ParcelPilotLogo className="h-5 w-5 text-emerald-600" />
-                    </div>
+                    <ParcelPilotLogo className="w-8 h-8 shadow-sm rounded-full shrink-0" />
                     <div>
                         <h1 className="font-extrabold text-sm tracking-tight text-slate-800 leading-none">ParcelPilot AI</h1>
                         <span className="text-[9px] font-black text-emerald-650 uppercase tracking-widest block mt-0.5">

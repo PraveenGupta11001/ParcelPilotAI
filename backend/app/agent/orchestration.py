@@ -21,6 +21,9 @@ class AgentService:
         self.openai_key = os.getenv("OPENAI_API_KEY")
         if self.openai_key and self.openai_key.startswith("your-"):
             self.openai_key = None
+        self.groq_key = os.getenv("GROQ_API_KEY")
+        if self.groq_key and self.groq_key.startswith("your-"):
+            self.groq_key = None
 
     def run_tool(self, tool_name: str, arguments: dict) -> str:
         """
@@ -117,11 +120,20 @@ class AgentService:
         return prompt
 
     def run_agent_loop(self, chat_history: list[dict], message: str) -> dict:
+        """Executes the main tool-calling orchestrator loop.
+
+        Prioritizes Groq if available, then Anthropic Claude, then OpenAI, else simulated fallback.
+
+        Args:
+            chat_history: Historical list of preceding conversational messages.
+            message: The natural language statement from the user.
+
+        Returns:
+            dict: The final response containing text_response and tool_calls trace.
         """
-        Executes the main tool-calling orchestrator loop.
-        Prioritizes Anthropic Claude Messages, falls back to OpenAI Translation if Anthropic keys are absent.
-        """
-        if self.anthropic_key:
+        if self.groq_key:
+            return self._run_groq_loop(chat_history, message)
+        elif self.anthropic_key:
             return self._run_anthropic_loop(chat_history, message)
         elif self.openai_key:
             return self._run_openai_translation_loop(chat_history, message)
@@ -282,3 +294,332 @@ class AgentService:
             ans += f" Searched policies matching keyword filters."
             
         return {"text_response": ans, "tool_calls": self.trace}
+
+    def _run_groq_loop(self, chat_history: list[dict], message: str) -> dict:
+        """Executes tool-calling orchestration using Groq completions via the OpenAI SDK shell client."""
+        import openai
+        client = openai.OpenAI(
+            base_url="https://api.groq.com/openai/v1",
+            api_key=self.groq_key
+        )
+        
+        # Format Groq tools compatible with OpenAI tool calling schema
+        openai_tools = []
+        for t in TOOLS_DEFINITION:
+            openai_tools.append({
+                "type": "function",
+                "function": {
+                    "name": t["name"],
+                    "description": t["description"],
+                    "parameters": t["input_schema"]
+                }
+            })
+            
+        system_prompt = self.get_system_prompt()
+        messages = [{"role": "system", "content": system_prompt}]
+        
+        for h in chat_history:
+            role = "assistant" if h.get("role") == "assistant" else "user"
+            messages.append({"role": role, "content": h.get("content")})
+            
+        messages.append({"role": "user", "content": message})
+        
+        loop_limit = 5
+        while loop_limit > 0:
+            loop_limit -= 1
+            
+            response = client.chat.completions.create(
+                model=os.getenv("GROQ_MODEL", "qwen/qwen3.6-27b"),
+                messages=messages,
+                tools=openai_tools,
+                max_tokens=800
+            )
+            
+            choice = response.choices[0]
+            assistant_msg = choice.message
+            
+            to_append = {"role": "assistant", "content": assistant_msg.content or ""}
+            if assistant_msg.tool_calls:
+                to_append["tool_calls"] = [
+                    {
+                        "id": tc.id,
+                        "type": tc.type,
+                        "function": {
+                            "name": tc.function.name,
+                            "arguments": tc.function.arguments
+                        }
+                    } for tc in assistant_msg.tool_calls
+                ]
+            messages.append(to_append)
+            
+            if not assistant_msg.tool_calls:
+                return {"text_response": assistant_msg.content or "", "tool_calls": self.trace}
+                
+            for tc in assistant_msg.tool_calls:
+                args = json.loads(tc.function.arguments)
+                tool_output = self.run_tool(tc.function.name, args)
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tc.id,
+                    "name": tc.function.name,
+                    "content": tool_output
+                })
+                
+        return {"text_response": "Limit exceeded call loops.", "tool_calls": self.trace}
+
+    def run_agent_stream(self, chat_history: list[dict], message: str):
+        if self.groq_key:
+            yield from self._run_groq_loop_stream(chat_history, message)
+        elif self.anthropic_key:
+            yield from self._run_anthropic_loop_stream(chat_history, message)
+        elif self.openai_key:
+            yield from self._run_openai_translation_loop_stream(chat_history, message)
+        else:
+            yield from self._run_mock_fallback_loop_stream(message)
+
+    def _run_groq_loop_stream(self, chat_history: list[dict], message: str):
+        import openai
+        client = openai.OpenAI(
+            base_url="https://api.groq.com/openai/v1",
+            api_key=self.groq_key
+        )
+        
+        openai_tools = []
+        for t in TOOLS_DEFINITION:
+            openai_tools.append({
+                "type": "function",
+                "function": {
+                    "name": t["name"],
+                    "description": t["description"],
+                    "parameters": t["input_schema"]
+                }
+            })
+            
+        system_prompt = self.get_system_prompt()
+        messages = [{"role": "system", "content": system_prompt}]
+        
+        for h in chat_history:
+            role = "assistant" if h.get("role") == "assistant" else "user"
+            messages.append({"role": role, "content": h.get("content")})
+            
+        messages.append({"role": "user", "content": message})
+        
+        loop_limit = 5
+        while loop_limit > 0:
+            loop_limit -= 1
+            
+            yield {"event": "status", "message": "Analyzing policies and system databases..."}
+            
+            response = client.chat.completions.create(
+                model=os.getenv("GROQ_MODEL", "qwen/qwen3.6-27b"),
+                messages=messages,
+                tools=openai_tools,
+                max_tokens=800
+            )
+            
+            choice = response.choices[0]
+            assistant_msg = choice.message
+            
+            to_append = {"role": "assistant", "content": assistant_msg.content or ""}
+            if assistant_msg.tool_calls:
+                to_append["tool_calls"] = [
+                    {
+                        "id": tc.id,
+                        "type": tc.type,
+                        "function": {
+                            "name": tc.function.name,
+                            "arguments": tc.function.arguments
+                        }
+                    } for tc in assistant_msg.tool_calls
+                ]
+            messages.append(to_append)
+            
+            if not assistant_msg.tool_calls:
+                yield {"event": "text", "text": assistant_msg.content or ""}
+                yield {"event": "done", "text_response": assistant_msg.content or "", "tool_calls": self.trace}
+                return
+                
+            for tc in assistant_msg.tool_calls:
+                args = json.loads(tc.function.arguments)
+                yield {"event": "tool_call", "name": tc.function.name, "args": args}
+                
+                tool_output = self.run_tool(tc.function.name, args)
+                
+                yield {"event": "tool_result", "name": tc.function.name, "output": tool_output}
+                
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tc.id,
+                    "name": tc.function.name,
+                    "content": tool_output
+                })
+
+    def _run_anthropic_loop_stream(self, chat_history: list[dict], message: str):
+        client = Anthropic(api_key=self.anthropic_key)
+        system_prompt = self.get_system_prompt()
+        
+        messages = []
+        for h in chat_history:
+            role = "assistant" if h.get("role") == "assistant" else "user"
+            messages.append({"role": role, "content": h.get("content")})
+            
+        messages.append({"role": "user", "content": message})
+        
+        loop_limit = 5
+        while loop_limit > 0:
+            loop_limit -= 1
+            
+            yield {"event": "status", "message": "Claude is evaluating policies and agreement documents..."}
+            
+            response = client.messages.create(
+                model="claude-3-5-sonnet-20241022",
+                max_tokens=1000,
+                system=system_prompt,
+                messages=messages,
+                tools=TOOLS_DEFINITION
+            )
+            
+            text_ans = ""
+            tool_calls_req = []
+            
+            for content in response.content:
+                if content.type == "text":
+                    text_ans += content.text
+                elif content.type == "tool_use":
+                    tool_calls_req.append(content)
+            
+            if not tool_calls_req:
+                yield {"event": "text", "text": text_ans}
+                yield {"event": "done", "text_response": text_ans, "tool_calls": self.trace}
+                return
+            
+            assistant_content = []
+            if text_ans:
+                assistant_content.append({"type": "text", "text": text_ans})
+            
+            for tool_use in tool_calls_req:
+                assistant_content.append({
+                    "type": "tool_use",
+                    "id": tool_use.id,
+                    "name": tool_use.name,
+                    "input": tool_use.input
+                })
+            
+            messages.append({"role": "assistant", "content": assistant_content})
+            
+            tool_results_content = []
+            for tool_use in tool_calls_req:
+                yield {"event": "tool_call", "name": tool_use.name, "args": tool_use.input}
+                
+                tool_output = self.run_tool(tool_use.name, tool_use.input)
+                
+                yield {"event": "tool_result", "name": tool_use.name, "output": tool_output}
+                
+                tool_results_content.append({
+                    "type": "tool_result",
+                    "tool_use_id": tool_use.id,
+                    "content": tool_output
+                })
+                
+            messages.append({"role": "user", "content": tool_results_content})
+            
+        yield {"event": "text", "text": "Limit exceeded call loops."}
+        yield {"event": "done", "text_response": "Limit exceeded call loops.", "tool_calls": self.trace}
+
+    def _run_openai_translation_loop_stream(self, chat_history: list[dict], message: str):
+        import openai
+        client = openai.OpenAI(api_key=self.openai_key)
+        
+        openai_tools = []
+        for t in TOOLS_DEFINITION:
+            openai_tools.append({
+                "type": "function",
+                "function": {
+                    "name": t["name"],
+                    "description": t["description"],
+                    "parameters": t["input_schema"]
+                }
+            })
+            
+        system_prompt = self.get_system_prompt()
+        messages = [{"role": "system", "content": system_prompt}]
+        
+        for h in chat_history:
+            role = "assistant" if h.get("role") == "assistant" else "user"
+            messages.append({"role": role, "content": h.get("content")})
+            
+        messages.append({"role": "user", "content": message})
+        
+        loop_limit = 5
+        while loop_limit > 0:
+            loop_limit -= 1
+            
+            yield {"event": "status", "message": "Searching system parameters and running validations..."}
+            
+            response = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=messages,
+                tools=openai_tools,
+                max_tokens=800
+            )
+            
+            choice = response.choices[0]
+            assistant_msg = choice.message
+            
+            to_append = {"role": "assistant", "content": assistant_msg.content or ""}
+            if assistant_msg.tool_calls:
+                to_append["tool_calls"] = [
+                    {
+                        "id": tc.id,
+                        "type": tc.type,
+                        "function": {
+                            "name": tc.function.name,
+                            "arguments": tc.function.arguments
+                        }
+                    } for tc in assistant_msg.tool_calls
+                ]
+            messages.append(to_append)
+            
+            if not assistant_msg.tool_calls:
+                yield {"event": "text", "text": assistant_msg.content or ""}
+                yield {"event": "done", "text_response": assistant_msg.content or "", "tool_calls": self.trace}
+                return
+                
+            for tc in assistant_msg.tool_calls:
+                args = json.loads(tc.function.arguments)
+                yield {"event": "tool_call", "name": tc.function.name, "args": args}
+                
+                tool_output = self.run_tool(tc.function.name, args)
+                
+                yield {"event": "tool_result", "name": tc.function.name, "output": tool_output}
+                
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tc.id,
+                    "name": tc.function.name,
+                    "content": tool_output
+                })
+                
+        yield {"event": "text", "text": "Limit exceeded."}
+        yield {"event": "done", "text_response": "Limit exceeded.", "tool_calls": self.trace}
+
+    def _run_mock_fallback_loop_stream(self, message: str):
+        msg_lower = message.lower()
+        ans = "I am operating in offline simulated mode."
+        
+        yield {"event": "status", "message": "Offline dispatcher analyzing request..."}
+        
+        if "cancellation" in msg_lower or "cancel" in msg_lower:
+            ans += " To cancel a shipment, please provide the shipment/order ID. If it is booked longer than 30 minutes, standard fees apply."
+            yield {"event": "status", "message": "Checking shipment cancellation constraints..."}
+        elif "credit" in msg_lower or "refund" in msg_lower:
+            ans += " Service credit eligibility requires a carrier fault delay exceeding policy thresholds."
+            yield {"event": "status", "message": "Evaluating service credit policies..."}
+        elif "search" in msg_lower or "policy" in msg_lower:
+            yield {"event": "tool_call", "name": "search_documents", "args": {"query": message}}
+            tool_output = self.run_tool("search_documents", {"query": message})
+            yield {"event": "tool_result", "name": "search_documents", "output": tool_output}
+            ans += f" Searched policies matching keyword filters."
+            
+        yield {"event": "text", "text": ans}
+        yield {"event": "done", "text_response": ans, "tool_calls": self.trace}

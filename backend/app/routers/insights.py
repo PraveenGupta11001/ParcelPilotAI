@@ -13,5 +13,16 @@ def insights(
     current_user: User = Depends(RoleChecker(["internal_support", "internal_lead"])),
     db: Session = Depends(get_db)
 ):
+    """Retrieves operational insights and customer service signals analytics.
+
+    Enforces support staff or manager role validation (internal_support, internal_lead).
+
+    Args:
+        current_user: Authenticated staff user object.
+        db: Database session.
+
+    Returns:
+        dict: Statistical insights mapping ticket counts, SLA warnings, and anomalies.
+    """
     stats = get_operational_signals(db, current_user)
     return stats

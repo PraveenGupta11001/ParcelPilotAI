@@ -17,6 +17,9 @@ openpyxl>=3.1.2
 # AI Services Integration
 voyageai>=0.2.3
 anthropic>=0.21.3
+openai>=1.0.0
+groq>=0.5.0
+
 
 # Auth & Security
 python-jose[cryptography]>=3.3.0

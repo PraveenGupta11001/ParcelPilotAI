@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Upload, FileText, X, Search, ShieldAlert } from 'lucide-react';
-import { Button, Select, Spinner } from '../ui';
+import { Upload, FileText, X, Search, ShieldAlert, Eye, Download } from 'lucide-react';
+import { Button, Select, Spinner, Modal } from '../ui';
+import { toast } from 'sonner';
 
 interface DocumentViewerProps {
     API_URL: string;
@@ -20,6 +21,9 @@ export default function DocumentViewer({ API_URL, token, user, onClose }: Docume
     const [selectedDoc, setSelectedDoc] = useState<any>(null);
     const [loadingContent, setLoadingContent] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
+    const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+    const [pdfModalOpen, setPdfModalOpen] = useState(false);
+    const [loadingPdf, setLoadingPdf] = useState(false);
 
     useEffect(() => {
         fetchDocuments();
@@ -64,6 +68,42 @@ export default function DocumentViewer({ API_URL, token, user, onClose }: Docume
         }
     };
 
+    const handleActionPdf = async (filename: string, action: 'view' | 'download') => {
+        setLoadingPdf(true);
+        try {
+            const res = await fetch(`${API_URL}/uploaded-documents/${encodeURIComponent(filename)}/download`, {
+                headers: {
+                    'Authorization': `Bearer ${token}`
+                }
+            });
+            if (res.ok) {
+                const blob = await res.blob();
+                const objectUrl = URL.createObjectURL(blob);
+                if (action === 'view') {
+                    setPdfUrl(objectUrl);
+                    setPdfModalOpen(true);
+                } else {
+                    const a = document.createElement('a');
+                    a.href = objectUrl;
+                    a.download = filename;
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                    // Revoke after download trigger
+                    setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+                    toast.success(`Download started for ${filename}`);
+                }
+            } else {
+                toast.error('This uploaded file does not have a physical PDF on the server (text chunks only). Showing content outline only.');
+            }
+        } catch (e) {
+            console.error('Failed to get PDF file', e);
+            toast.error('This uploaded file does not have a physical PDF on the server (text chunks only). Showing content outline only.');
+        } finally {
+            setLoadingPdf(false);
+        }
+    };
+
     const handleUploadSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!file) return;
@@ -90,10 +130,12 @@ export default function DocumentViewer({ API_URL, token, user, onClose }: Docume
 
             if (res.ok) {
                 const data = await res.json();
+                const successMsg = `Successfully uploaded ${data.filename}. Indexing created ${data.chunks_count} chunks.`;
                 setUploadStatus({
                     type: 'success',
-                    msg: `Successfully uploaded ${data.filename}. Indexing created ${data.chunks_count} chunks.`
+                    msg: successMsg
                 });
+                toast.success(successMsg);
                 setFile(null);
                 // Clear input element
                 const fileInput = document.getElementById('doc-file-input') as HTMLInputElement;
@@ -101,16 +143,20 @@ export default function DocumentViewer({ API_URL, token, user, onClose }: Docume
                 fetchDocuments();
             } else {
                 const err = await res.json();
+                const errMsg = err.detail || 'Upload failed.';
                 setUploadStatus({
                     type: 'error',
-                    msg: err.detail || 'Upload failed.'
+                    msg: errMsg
                 });
+                toast.error(errMsg);
             }
         } catch (err) {
+            const errMsg = 'Connection error during upload.';
             setUploadStatus({
                 type: 'error',
-                msg: 'Connection error during upload.'
+                msg: errMsg
             });
+            toast.error(errMsg);
         } finally {
             setUploading(false);
         }
@@ -285,9 +331,28 @@ export default function DocumentViewer({ API_URL, token, user, onClose }: Docume
                                         Authority Level {selectedDoc.authority_level}
                                     </span>
                                 </div>
-                                <div className="flex items-center justify-between text-[10px] text-slate-400 font-bold uppercase tracking-wider">
+                                <div className="flex items-center justify-between text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-2">
                                     <span>Scope: {selectedDoc.scope}</span>
                                     <span>Date: {selectedDoc.effective_date}</span>
+                                </div>
+                                <div className="flex gap-2 pt-1 border-t border-slate-100">
+                                    <Button
+                                        onClick={() => handleActionPdf(selectedDoc.filename, 'view')}
+                                        disabled={loadingPdf}
+                                        variant="secondary"
+                                        className="flex-1 text-[10px] font-black uppercase tracking-wider py-1.5 flex items-center justify-center gap-1 bg-slate-100 hover:bg-slate-200 text-slate-700 cursor-pointer"
+                                    >
+                                        {loadingPdf ? <Spinner className="h-3 w-3 text-slate-500 animate-spin" /> : <Eye className="h-3.5 w-3.5" />}
+                                        View PDF
+                                    </Button>
+                                    <Button
+                                        onClick={() => handleActionPdf(selectedDoc.filename, 'download')}
+                                        disabled={loadingPdf}
+                                        className="flex-1 text-[10px] font-black uppercase tracking-wider py-1.5 flex items-center justify-center gap-1 bg-emerald-650 hover:bg-emerald-700 text-slate-800 hover:text-white cursor-pointer"
+                                    >
+                                        <Download className="h-3.5 w-3.5" />
+                                        Download
+                                    </Button>
                                 </div>
                             </div>
                             <div className="border-t border-border pt-3">
@@ -306,6 +371,32 @@ export default function DocumentViewer({ API_URL, token, user, onClose }: Docume
                     )}
                 </div>
             </div>
+            <Modal
+                open={pdfModalOpen}
+                onClose={() => {
+                    setPdfModalOpen(false);
+                    if (pdfUrl) {
+                        URL.revokeObjectURL(pdfUrl);
+                        setPdfUrl(null);
+                    }
+                }}
+                title={`Viewing Document: ${selectedDoc?.filename}`}
+                className="max-w-4xl h-[90vh] flex flex-col p-4 bg-white"
+            >
+                <div className="flex-1 w-full h-[70vh] rounded-lg border border-border overflow-hidden mt-2 bg-slate-50">
+                    {pdfUrl ? (
+                        <iframe
+                            src={`${pdfUrl}#toolbar=0`}
+                            className="w-full h-full border-none rounded-lg"
+                            title="Interactive PDF Viewer"
+                        />
+                    ) : (
+                        <div className="w-full h-full flex items-center justify-center text-xs font-semibold text-slate-400">
+                            Loading document preview...
+                        </div>
+                    )}
+                </div>
+            </Modal>
         </div>
     );
 }
