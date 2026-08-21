@@ -31,7 +31,7 @@ def localize_dt(val):
     return dt
 
 def seed_database():
-    excel_path = "/home/praveen/my_projects/ParcelPilot_Customer_Support/Data/AI Agent Assessment - Candidate Pack/ParcelPilot_Assessment_Data.xlsx"
+    excel_path = "/home/praveen/my_projects/ParcelPilot_Customer_Support/Data/ParcelPilot_Assessment_Data.xlsx"
     
     if not os.path.exists(excel_path):
         print(f"Error: Excel file not found at {excel_path}")

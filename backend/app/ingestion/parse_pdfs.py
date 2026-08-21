@@ -50,7 +50,7 @@ SOURCE_REGISTRY = {
 }
 
 def ingest_all_pdfs():
-    pack_dir = "/home/praveen/my_projects/ParcelPilot_Customer_Support/Data/AI Agent Assessment - Candidate Pack"
+    pack_dir = "/home/praveen/my_projects/ParcelPilot_Customer_Support/Data"
     files = glob.glob(os.path.join(pack_dir, "*.pdf"))
     
     if not files:

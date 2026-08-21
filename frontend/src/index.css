@@ -130,3 +130,9 @@
   border: 2px solid transparent;
   background-clip: content-box;
 }
+
+.bg-login-bg {
+  background: linear-gradient(135deg, #0e3a5e, #1e4a7e);
+  background-size: cover;
+  background-position: center;
+}

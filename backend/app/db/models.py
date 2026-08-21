@@ -115,3 +115,30 @@ class PendingAction(Base):
     status = Column(String, default="PENDING")  # PENDING, APPROVED, REJECTED
     created_at = Column(DateTime(timezone=True), default=datetime.datetime.utcnow)
 
+
+class ChatSession(Base):
+    __tablename__ = "chat_sessions"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(String, ForeignKey("users.user_id"), nullable=False)
+    title = Column(String, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=datetime.datetime.utcnow)
+    updated_at = Column(DateTime(timezone=True), default=datetime.datetime.utcnow)
+    
+    user = relationship("User")
+    messages = relationship("ChatMessage", back_populates="session", cascade="all, delete-orphan")
+
+
+class ChatMessage(Base):
+    __tablename__ = "chat_messages"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    session_id = Column(Integer, ForeignKey("chat_sessions.id", ondelete="CASCADE"), nullable=False)
+    sender = Column(String, nullable=False)  # user, bot
+    text = Column(Text, nullable=False)
+    tool_calls = Column(Text, nullable=True)  # Store JSON logs if any
+    created_at = Column(DateTime(timezone=True), default=datetime.datetime.utcnow)
+    
+    session = relationship("ChatSession", back_populates="messages")
+
+

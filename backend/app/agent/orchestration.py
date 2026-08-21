@@ -16,7 +16,11 @@ class AgentService:
         self.user = user
         self.trace = []  # List of dicts compiling tool execution outputs: {tool_name, args, output}
         self.anthropic_key = os.getenv("ANTHROPIC_API_KEY")
+        if self.anthropic_key and self.anthropic_key.startswith("your-"):
+            self.anthropic_key = None
         self.openai_key = os.getenv("OPENAI_API_KEY")
+        if self.openai_key and self.openai_key.startswith("your-"):
+            self.openai_key = None
 
     def run_tool(self, tool_name: str, arguments: dict) -> str:
         """
