@@ -1,0 +1,27 @@
+# Python dependencies
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+
+# Node packaging dependencies
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# System/Environment files
+.env
+.env*.local
+.DS_Store
+Thumbs.db
+
+# Database mounts/logs
+pgdata/
+*.log
+
+# dev_docs
+dev_test_reads
