@@ -8,14 +8,16 @@ A secure, tenant-isolated AI Customer Support Portal and Operational Insights Da
 
 ### Backend Service Stack
 *   **Web Framework**: FastAPI core with asynchronous endpoints and SSE response streaming support.
-*   **Database & Vector Store**: PostgreSQL with `pgvector` indexing for semantic policy routing and relational tracking.
+*   **Database & Vector Store**: PostgreSQL with `pgvector` indexing for semantic policy routing, relational tracking, and UUID-based chat sessions.
 *   **AI Agent Orchestrator**: Anthropic Claude messages loop implementing reactive tools and trust safety checks.
 *   **Reliability Guardrails**: Propose-confirm workflow gating database mutations and enforcing role-based permissions at the tool level.
+*   **Document Metadata Tools**: Distinct document tracking (`get_document_count` & `list_all_documents`) with built-in tenant filtering.
 
 ### Frontend Interface
 *   **Development Framework**: Vite + React (TypeScript) + React Router.
 *   **Styling Engine**: Tailwind CSS v4 featuring HSL color systems and custom dot-grid backplate overlays.
-*   **Components**: Custom atomic library (`Button`, `Card`, `TextInput`, `Select`, etc.).
+*   **Components**: Custom atomic library (`Button`, `Card`, `TextInput`, `Select`, etc.) with ref forwarding support.
+*   **Branded Experience**: Authentic logo layouts for login screen and chat empty states combined with keyboard autofocus flow management.
 *   **Dashboards**: Recharts analytics visualization of SLAs, delay statistics, and carrier reliability scorecards.
 
 ---
