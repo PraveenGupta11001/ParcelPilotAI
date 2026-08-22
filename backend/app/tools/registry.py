@@ -96,5 +96,37 @@ TOOLS_DEFINITION = [
             "type": "object",
             "properties": {}
         }
+    },
+    {
+        "name": "get_document_count",
+        "description": (
+            "Retrieve the total number of distinct documents and support policies currently indexed "
+            "in the database, respecting the user's role-based tenant access limits."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "include_deprecated": {
+                    "type": "boolean",
+                    "description": "Whether to include historical or deprecated documents. Defaults to False."
+                }
+            }
+        }
+    },
+    {
+        "name": "list_all_documents",
+        "description": (
+            "List all unique documents, support policies, and signed agreements indexed in the database, "
+            "showing their authority level, effective date, status, and scope."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "include_deprecated": {
+                    "type": "boolean",
+                    "description": "Whether to include historical or deprecated documents. Defaults to False."
+                }
+            }
+        }
     }
 ]

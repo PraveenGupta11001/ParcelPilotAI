@@ -1,3 +1,7 @@
+import warnings
+warnings.filterwarnings("ignore", message=".*ARC4.*")
+warnings.filterwarnings("ignore", message=".*utcnow.*")
+
 import pytest
 import os
 from sqlalchemy import create_engine, text

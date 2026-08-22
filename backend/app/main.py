@@ -1,6 +1,7 @@
 import warnings
-# Silence cryptography library deprecation warning
-warnings.filterwarnings("ignore", message=".*ARC4.*", category=DeprecationWarning)
+# Silence cryptography and datetime deprecation warnings
+warnings.filterwarnings("ignore", message=".*ARC4.*")
+warnings.filterwarnings("ignore", message=".*utcnow.*")
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware

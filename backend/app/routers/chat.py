@@ -8,7 +8,7 @@ from app.db.session import get_db
 from app.db.models import User, PendingAction, Order, Ticket, Escalation, ChatSession, ChatMessage
 from app.auth.deps import get_current_user
 from app.schemas.chat import ChatRequest, ConfirmRequest, CreateSessionRequest
-from app.agent.orchestration import AgentService
+from app.agent.orchestration import AgentService, RateLimitExceededException
 from app.config import SNAPSHOT_DATETIME
 
 router = APIRouter(prefix="/chat", tags=["chat"])
@@ -124,6 +124,25 @@ def chat(
                 if db_session:
                     db_session.updated_at = SNAPSHOT_DATETIME
                 gen_db.commit()
+            except RateLimitExceededException as rle:
+                error_text = str(rle)
+                yield f"data: {json.dumps({'event': 'text', 'text': error_text})}\n\n"
+                yield f"data: {json.dumps({'event': 'done', 'text_response': error_text, 'tool_calls': stream_agent.trace})}\n\n"
+                
+                tool_calls_str = json.dumps(stream_agent.trace) if stream_agent.trace else None
+                bot_msg_db = ChatMessage(
+                    session_id=session_id,
+                    sender="bot",
+                    text=error_text,
+                    tool_calls=tool_calls_str,
+                    created_at=SNAPSHOT_DATETIME
+                )
+                gen_db.add(bot_msg_db)
+                
+                db_session = gen_db.query(ChatSession).filter(ChatSession.id == session_id).first()
+                if db_session:
+                    db_session.updated_at = SNAPSHOT_DATETIME
+                gen_db.commit()
             except Exception as e:
                 yield f"data: {json.dumps({'event': 'status', 'message': f'Internal agent error: {str(e)}'})}\n\n"
             finally:
@@ -136,12 +155,19 @@ def chat(
 
     # Synchronous non-streaming path
     agent = AgentService(db, current_user)
-    result = agent.run_agent_loop(history_list, req.message)
-    tool_calls_str = json.dumps(result.get("tool_calls")) if result.get("tool_calls") else None
+    try:
+        result = agent.run_agent_loop(history_list, req.message)
+        text_response = result.get("text_response", "")
+        tool_calls = result.get("tool_calls")
+    except RateLimitExceededException as rle:
+        text_response = str(rle)
+        tool_calls = agent.trace
+        
+    tool_calls_str = json.dumps(tool_calls) if tool_calls else None
     bot_msg_db = ChatMessage(
         session_id=session_id,
         sender="bot",
-        text=result.get("text_response", ""),
+        text=text_response,
         tool_calls=tool_calls_str,
         created_at=SNAPSHOT_DATETIME
     )
@@ -149,8 +175,8 @@ def chat(
     db.commit()
 
     return {
-        "text_response": result.get("text_response", ""),
-        "tool_calls": result.get("tool_calls"),
+        "text_response": text_response,
+        "tool_calls": tool_calls,
         "session_id": session_id
     }
 @router.post("/confirm")
@@ -332,7 +358,7 @@ def create_session(
 
 @router.delete("/sessions/{session_id}")
 def delete_session(
-    session_id: int,
+    session_id: str,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -365,7 +391,7 @@ def delete_session(
 
 @router.get("/sessions/{session_id}/messages")
 def get_session_messages(
-    session_id: int,
+    session_id: str,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):

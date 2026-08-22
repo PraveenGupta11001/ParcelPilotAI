@@ -28,7 +28,7 @@ interface UserProfile {
 }
 
 interface SessionItem {
-  id: number;
+  id: string;
   user_id: string;
   title: string;
   created_at: string;
@@ -55,10 +55,20 @@ function ChatPanelWrapper({ API_URL, token, user, fetchSessions, fetchInsights }
 }
 
 function AppContent() {
-  const [token, setToken] = useState<string | null>(localStorage.getItem('token'));
+  const [token, setToken] = useState<string | null>(localStorage.getItem('access_token'));
+  const [, setRefreshToken] = useState<string | null>(localStorage.getItem('refresh_token'));
   const [user, setUser] = useState<UserProfile | null>(
     localStorage.getItem('user') ? JSON.parse(localStorage.getItem('user')!) : null
   );
+
+  useEffect(() => {
+    const handleTokenRefreshed = (e: any) => {
+      setToken(e.detail.access_token);
+      setRefreshToken(e.detail.refresh_token);
+    };
+    window.addEventListener('token-refreshed', handleTokenRefreshed);
+    return () => window.removeEventListener('token-refreshed', handleTokenRefreshed);
+  }, []);
 
   const [showDocViewer, setShowDocViewer] = useState(false);
   const [sessions, setSessions] = useState<SessionItem[]>([]);
@@ -69,7 +79,7 @@ function AppContent() {
   const [insightsError, setInsightsError] = useState('');
 
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
-  const [sessionToDelete, setSessionToDelete] = useState<number | null>(null);
+  const [sessionToDelete, setSessionToDelete] = useState<string | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
 
   const navigate = useNavigate();
@@ -127,7 +137,7 @@ function AppContent() {
     }
   };
 
-  const deleteSession = async (sessionId: number, e: React.MouseEvent) => {
+  const deleteSession = async (sessionId: string, e: React.MouseEvent) => {
     e.stopPropagation();
     setSessionToDelete(sessionId);
     setDeleteConfirmOpen(true);
@@ -161,9 +171,11 @@ function AppContent() {
   };
 
   const handleLogout = () => {
-    localStorage.removeItem('token');
+    localStorage.removeItem('access_token');
+    localStorage.removeItem('refresh_token');
     localStorage.removeItem('user');
     setToken(null);
+    setRefreshToken(null);
     setUser(null);
     setSessions([]);
     navigate('/login');
@@ -174,47 +186,28 @@ function AppContent() {
       <Routes>
         <Route
           path="/login"
-          element={<LoginPage API_URL={API_URL} setToken={setToken} setUser={setUser} />}
+          element={
+            token && user ? (
+              <Navigate to={user.role === 'customer' ? '/chat' : '/dashboard'} replace />
+            ) : (
+              <LoginPage API_URL={API_URL} setToken={setToken} setRefreshToken={setRefreshToken} setUser={setUser} />
+            )
+          }
         />
         <Route
           path="/register"
-          element={<RegisterPage API_URL={API_URL} setToken={setToken} setUser={setUser} />}
+          element={
+            token && user ? (
+              <Navigate to={user.role === 'customer' ? '/chat' : '/dashboard'} replace />
+            ) : (
+              <RegisterPage API_URL={API_URL} setToken={setToken} setRefreshToken={setRefreshToken} setUser={setUser} />
+            )
+          }
         />
 
         {/* Protected Routes wrapped in MainLayout */}
         <Route
-          path="/chat"
-          element={
-            <ProtectedRoute user={user}>
-              <MainLayout
-                user={user}
-                token={token}
-                handleLogout={handleLogout}
-                sessions={sessions}
-                loadingSessions={loadingSessions}
-                deleteSession={deleteSession}
-                showDocViewer={showDocViewer}
-                setShowDocViewer={setShowDocViewer}
-              >
-                <ChatPanel
-                  API_URL={API_URL}
-                  token={token}
-                  user={user}
-                  activeSessionId={undefined}
-                  setActiveSessionId={(id) => {
-                    if (id) navigate(`/chat/${id}`);
-                    else navigate('/chat');
-                  }}
-                  fetchSessions={fetchSessions}
-                  fetchInsights={fetchInsights}
-                />
-              </MainLayout>
-            </ProtectedRoute>
-          }
-        />
-
-        <Route
-          path="/chat/:chatId"
+          path="/chat/:chatId?"
           element={
             <ProtectedRoute user={user}>
               <MainLayout

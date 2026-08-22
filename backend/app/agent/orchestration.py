@@ -9,6 +9,23 @@ from app.tools.document_search import search_documents
 from app.tools.structured_data import query_structured_data
 from app.tools.actions import propose_action
 from app.tools.proactive_signals import get_operational_signals
+from app.tools.document_info import get_document_count, list_all_documents
+
+class RateLimitExceededException(Exception):
+    pass
+
+def _is_rate_or_token_limit_error(e: Exception) -> bool:
+    import openai
+    if isinstance(e, openai.RateLimitError):
+        return True
+    if hasattr(e, "status_code") and e.status_code == 429:
+        return True
+    
+    err_str = str(e).lower()
+    for keyword in ["rate limit", "rate_limit", "429", "token limit", "token_limit", "quota", "too many requests", "resource exhausted"]:
+        if keyword in err_str:
+            return True
+    return False
 
 class AgentService:
     def __init__(self, db: Session, user: User):
@@ -24,6 +41,13 @@ class AgentService:
         self.groq_key = os.getenv("GROQ_API_KEY")
         if self.groq_key and self.groq_key.startswith("your-"):
             self.groq_key = None
+        self.groq_key_backup = os.getenv("GROQ_API_KEY_BACKUP")
+        if self.groq_key_backup and self.groq_key_backup.startswith("your-"):
+            self.groq_key_backup = None
+        self.gemini_key = os.getenv("GEMINI_API_KEY")
+        if self.gemini_key and self.gemini_key.startswith("your-"):
+            self.gemini_key = None
+
 
     def run_tool(self, tool_name: str, arguments: dict) -> str:
         """
@@ -68,6 +92,28 @@ class AgentService:
                 res = get_operational_signals(
                     db=self.db,
                     user=self.user
+                )
+                output = json.dumps(res, default=str)
+            elif tool_name == "get_document_count":
+                include_deprecated = arguments.get("include_deprecated", False)
+                # Force FALSE for customer role
+                if self.user.role == "customer":
+                    include_deprecated = False
+                res = get_document_count(
+                    db=self.db,
+                    user=self.user,
+                    include_deprecated=include_deprecated
+                )
+                output = json.dumps(res, default=str)
+            elif tool_name == "list_all_documents":
+                include_deprecated = arguments.get("include_deprecated", False)
+                # Force FALSE for customer role
+                if self.user.role == "customer":
+                    include_deprecated = False
+                res = list_all_documents(
+                    db=self.db,
+                    user=self.user,
+                    include_deprecated=include_deprecated
                 )
                 output = json.dumps(res, default=str)
             else:
@@ -122,7 +168,7 @@ class AgentService:
     def run_agent_loop(self, chat_history: list[dict], message: str) -> dict:
         """Executes the main tool-calling orchestrator loop.
 
-        Prioritizes Groq if available, then Anthropic Claude, then OpenAI, else simulated fallback.
+        Prioritizes Groq (with keys fallback) if available, then Anthropic Claude, then OpenAI, else simulated fallback.
 
         Args:
             chat_history: Historical list of preceding conversational messages.
@@ -131,14 +177,64 @@ class AgentService:
         Returns:
             dict: The final response containing text_response and tool_calls trace.
         """
+        options = []
         if self.groq_key:
-            return self._run_groq_loop(chat_history, message)
-        elif self.anthropic_key:
-            return self._run_anthropic_loop(chat_history, message)
-        elif self.openai_key:
-            return self._run_openai_translation_loop(chat_history, message)
+            options.append({
+                "api_key": self.groq_key,
+                "base_url": "https://api.groq.com/openai/v1",
+                "model": os.getenv("GROQ_MODEL", "qwen/qwen3.6-27b"),
+                "name": "Groq Primary"
+            })
+        if self.groq_key_backup:
+            options.append({
+                "api_key": self.groq_key_backup,
+                "base_url": "https://api.groq.com/openai/v1",
+                "model": os.getenv("GROQ_MODEL", "qwen/qwen3.6-27b"),
+                "name": "Groq Backup"
+            })
+        if self.gemini_key:
+            options.append({
+                "api_key": self.gemini_key,
+                "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
+                "model": "gemini-2.5-flash",
+                "name": "Gemini Backup"
+            })
+
+        if not options:
+            if self.anthropic_key:
+                return self._run_anthropic_loop(chat_history, message)
+            elif self.openai_key:
+                return self._run_openai_translation_loop(chat_history, message)
+            else:
+                return self._run_mock_fallback_loop(message)
+
+        last_err = None
+        rate_limit_occurred = False
+        for option in options:
+            try:
+                return self._run_openai_like_loop(
+                    chat_history=chat_history,
+                    message=message,
+                    api_key=option["api_key"],
+                    base_url=option["base_url"],
+                    model=option["model"]
+                )
+            except Exception as e:
+                last_err = e
+                if _is_rate_or_token_limit_error(e):
+                    rate_limit_occurred = True
+                
+                print(f"Fallback warning: {option['name']} failed with error: {e}. Trying next option if available.")
+                continue
+
+        if rate_limit_occurred:
+            raise RateLimitExceededException(
+                "⚠️ **Rate Limit / Token Limit Exceeded**\n\n"
+                "The chat session has exceeded the available model capacity or the message history has grown too large.\n\n"
+                "Please initialize a **new chat session** to continue, or try again in **5 minutes**."
+            )
         else:
-            return self._run_mock_fallback_loop(message)
+            raise last_err if last_err else Exception("No API keys succeeded.")
 
     def _run_anthropic_loop(self, chat_history: list[dict], message: str) -> dict:
         client = Anthropic(api_key=self.anthropic_key)
@@ -240,14 +336,14 @@ class AgentService:
                 model="gpt-4o-mini",
                 messages=messages,
                 tools=openai_tools,
-                max_tokens=800
+                max_tokens=4096
             )
             
             choice = response.choices[0]
             assistant_msg = choice.message
             
             # Convert message to add to list
-            to_append = {"role": "assistant", "content": assistant_msg.content or ""}
+            to_append = {"role": "assistant", "content": assistant_msg.content}
             if assistant_msg.tool_calls:
                 to_append["tool_calls"] = [
                     {
@@ -295,15 +391,15 @@ class AgentService:
             
         return {"text_response": ans, "tool_calls": self.trace}
 
-    def _run_groq_loop(self, chat_history: list[dict], message: str) -> dict:
-        """Executes tool-calling orchestration using Groq completions via the OpenAI SDK shell client."""
+    def _run_openai_like_loop(self, chat_history: list[dict], message: str, api_key: str, base_url: str, model: str) -> dict:
+        """Executes tool-calling orchestration using completions via any OpenAI compatible SDK API configuration."""
         import openai
         client = openai.OpenAI(
-            base_url="https://api.groq.com/openai/v1",
-            api_key=self.groq_key
+            base_url=base_url,
+            api_key=api_key
         )
         
-        # Format Groq tools compatible with OpenAI tool calling schema
+        # Format tools compatible with OpenAI tool calling schema
         openai_tools = []
         for t in TOOLS_DEFINITION:
             openai_tools.append({
@@ -329,10 +425,10 @@ class AgentService:
             loop_limit -= 1
             
             response = client.chat.completions.create(
-                model=os.getenv("GROQ_MODEL", "qwen/qwen3.6-27b"),
+                model=model,
                 messages=messages,
                 tools=openai_tools,
-                max_tokens=800
+                max_tokens=4096
             )
             
             choice = response.choices[0]
@@ -368,20 +464,73 @@ class AgentService:
         return {"text_response": "Limit exceeded call loops.", "tool_calls": self.trace}
 
     def run_agent_stream(self, chat_history: list[dict], message: str):
+        options = []
         if self.groq_key:
-            yield from self._run_groq_loop_stream(chat_history, message)
-        elif self.anthropic_key:
-            yield from self._run_anthropic_loop_stream(chat_history, message)
-        elif self.openai_key:
-            yield from self._run_openai_translation_loop_stream(chat_history, message)
-        else:
-            yield from self._run_mock_fallback_loop_stream(message)
+            options.append({
+                "api_key": self.groq_key,
+                "base_url": "https://api.groq.com/openai/v1",
+                "model": os.getenv("GROQ_MODEL", "qwen/qwen3.6-27b"),
+                "name": "Groq Primary"
+            })
+        if self.groq_key_backup:
+            options.append({
+                "api_key": self.groq_key_backup,
+                "base_url": "https://api.groq.com/openai/v1",
+                "model": os.getenv("GROQ_MODEL", "qwen/qwen3.6-27b"),
+                "name": "Groq Backup"
+            })
+        if self.gemini_key:
+            options.append({
+                "api_key": self.gemini_key,
+                "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
+                "model": "gemini-2.5-flash",
+                "name": "Gemini Backup"
+            })
 
-    def _run_groq_loop_stream(self, chat_history: list[dict], message: str):
+        if not options:
+            if self.anthropic_key:
+                yield from self._run_anthropic_loop_stream(chat_history, message)
+            elif self.openai_key:
+                yield from self._run_openai_translation_loop_stream(chat_history, message)
+            else:
+                yield from self._run_mock_fallback_loop_stream(message)
+            return
+
+        last_err = None
+        rate_limit_occurred = False
+        for option in options:
+            try:
+                yield from self._run_openai_like_loop_stream(
+                    chat_history=chat_history,
+                    message=message,
+                    api_key=option["api_key"],
+                    base_url=option["base_url"],
+                    model=option["model"],
+                    provider_name=option["name"]
+                )
+                return
+            except Exception as e:
+                last_err = e
+                if _is_rate_or_token_limit_error(e):
+                    rate_limit_occurred = True
+                
+                print(f"Fallback warning stream: {option['name']} failed with error: {e}. Trying next option if available.")
+                continue
+
+        if rate_limit_occurred:
+            raise RateLimitExceededException(
+                "⚠️ **Rate Limit / Token Limit Exceeded**\n\n"
+                "The chat session has exceeded the available model capacity or the message history has grown too large.\n\n"
+                "Please initialize a **new chat session** to continue, or try again in **5 minutes**."
+            )
+        else:
+            raise last_err if last_err else Exception("No API keys succeeded.")
+
+    def _run_openai_like_loop_stream(self, chat_history: list[dict], message: str, api_key: str, base_url: str, model: str, provider_name: str):
         import openai
         client = openai.OpenAI(
-            base_url="https://api.groq.com/openai/v1",
-            api_key=self.groq_key
+            base_url=base_url,
+            api_key=api_key
         )
         
         openai_tools = []
@@ -408,19 +557,19 @@ class AgentService:
         while loop_limit > 0:
             loop_limit -= 1
             
-            yield {"event": "status", "message": "Analyzing policies and system databases..."}
+            yield {"event": "status", "message": "Analyzing queries..."}
             
             response = client.chat.completions.create(
-                model=os.getenv("GROQ_MODEL", "qwen/qwen3.6-27b"),
+                model=model,
                 messages=messages,
                 tools=openai_tools,
-                max_tokens=800
+                max_tokens=4096
             )
             
             choice = response.choices[0]
             assistant_msg = choice.message
             
-            to_append = {"role": "assistant", "content": assistant_msg.content or ""}
+            to_append = {"role": "assistant", "content": assistant_msg.content}
             if assistant_msg.tool_calls:
                 to_append["tool_calls"] = [
                     {
@@ -560,7 +709,7 @@ class AgentService:
                 model="gpt-4o-mini",
                 messages=messages,
                 tools=openai_tools,
-                max_tokens=800
+                max_tokens=4096
             )
             
             choice = response.choices[0]

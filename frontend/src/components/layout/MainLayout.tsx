@@ -12,7 +12,7 @@ import {
     MessageSquare
 } from 'lucide-react';
 import DocumentViewer from '../chat/DocumentViewer';
-import parcelPilotLogo from '../../assets/ParcelPilotLogo.png';
+import parcelPilotLogo from '../../assets/parcelpilot.png';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
@@ -25,7 +25,7 @@ interface UserProfile {
 }
 
 interface SessionItem {
-    id: number;
+    id: string;
     user_id: string;
     title: string;
     created_at: string;
@@ -39,7 +39,7 @@ interface MainLayoutProps {
     handleLogout: () => void;
     sessions: SessionItem[];
     loadingSessions: boolean;
-    deleteSession: (sessionId: number, e: React.MouseEvent) => void;
+    deleteSession: (sessionId: string, e: React.MouseEvent) => void;
     showDocViewer: boolean;
     setShowDocViewer: (show: boolean) => void;
 }
@@ -77,7 +77,7 @@ export default function MainLayout({
             >
                 {/* Sidebar Header */}
                 <div className="p-5 border-b border-border flex items-center space-x-3 bg-white">
-                    <ParcelPilotLogo className="w-8 h-8 shadow-sm rounded-full shrink-0" />
+                    <ParcelPilotLogo className="w-10 h-10 shadow-sm rounded-full shrink-0 bg-white p-0.5 object-contain" />
                     <div>
                         <h1 className="font-extrabold text-sm tracking-tight text-slate-800 leading-none">ParcelPilot AI</h1>
                         <span className="text-[9px] font-black text-emerald-650 uppercase tracking-widest block mt-0.5">
@@ -213,10 +213,6 @@ export default function MainLayout({
                                 <span>Policy Vault</span>
                             </button>
                         )}
-                        <div className="flex items-center space-x-1.5 text-[9px] font-black uppercase tracking-wider text-slate-400">
-                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                            <span>Security isolation active</span>
-                        </div>
                     </div>
                 </header>
 

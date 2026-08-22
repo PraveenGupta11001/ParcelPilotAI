@@ -16,4 +16,4 @@ def test_chat_endpoint_basic(client, db_session):
     assert 'text_response' in data
     assert isinstance(data['text_response'], str)
     assert 'session_id' in data
-    assert isinstance(data['session_id'], int)
+    assert isinstance(data['session_id'], str)

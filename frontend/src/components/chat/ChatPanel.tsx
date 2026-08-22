@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Shield, Send, RefreshCw, FileText, ChevronDown, ChevronUp, Activity, Check, Copy } from 'lucide-react';
+import { Send, RefreshCw, FileText, ChevronDown, ChevronUp, Activity, Check, Copy } from 'lucide-react';
 import { Button, TextInput, EmptyState, ConfirmDialog } from '../ui';
 import { toast } from 'sonner';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import parcelPilotLogo from '../../assets/parcelpilot.png';
 
 interface Message {
     id: string;
@@ -92,6 +93,19 @@ export default function ChatPanel({
     const [confirmActionType, setConfirmActionType] = useState('');
     const [confirmLoading, setConfirmLoading] = useState(false);
 
+    const isCreatingSessionRef = useRef(false);
+    const chatInputRef = useRef<HTMLInputElement>(null);
+
+    // Auto-focus on input element when loading completes or session changes
+    useEffect(() => {
+        if (!loadingChat) {
+            const t = setTimeout(() => {
+                chatInputRef.current?.focus();
+            }, 60);
+            return () => clearTimeout(t);
+        }
+    }, [loadingChat, activeSessionId]);
+
     // Auto-scroll chat
     useEffect(() => {
         scrollRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -100,7 +114,11 @@ export default function ChatPanel({
     // Load message logs if session ID is set
     useEffect(() => {
         if (activeSessionId) {
-            loadSessionMessages();
+            if (isCreatingSessionRef.current) {
+                isCreatingSessionRef.current = false;
+            } else {
+                loadSessionMessages();
+            }
         } else {
             setMessages([]);
         }
@@ -156,6 +174,10 @@ export default function ChatPanel({
         setReasoningStatus('Initializing assistant request...');
         setLiveToolCalls([]);
 
+        if (!activeSessionId) {
+            isCreatingSessionRef.current = true;
+        }
+
         try {
             const formattedHistory = messages.map(m => ({
                 role: m.role || 'user',
@@ -171,7 +193,7 @@ export default function ChatPanel({
                 body: JSON.stringify({
                     message: userText,
                     chat_history: formattedHistory,
-                    session_id: activeSessionId ? parseInt(activeSessionId) : null,
+                    session_id: activeSessionId || null,
                     stream: true
                 })
             });
@@ -262,7 +284,7 @@ export default function ChatPanel({
                 setMessages(prev => [...prev, {
                     id: Math.random().toString(),
                     role: 'assistant',
-                    content: 'Error: Failed to process query through the backend orchestrator.'
+                    content: '⚠️ **Error: Failed to process query through the backend orchestrator.**\n\nThe server responded with an error status. Please check application settings or API logs.'
                 }]);
                 setLoadingChat(false);
             }
@@ -270,7 +292,7 @@ export default function ChatPanel({
             setMessages(prev => [...prev, {
                 id: Math.random().toString(),
                 role: 'assistant',
-                content: 'Error: API server unreachable.'
+                content: '⚠️ **Error: API server unreachable.**\n\nPlease check if the backend service is running normally.'
             }]);
             setLoadingChat(false);
         }
@@ -335,7 +357,9 @@ export default function ChatPanel({
                 {messages.length === 0 && !loadingChat && (
                     <div className="h-full flex items-center justify-center py-16">
                         <EmptyState
-                            icon={Shield}
+                            icon={() => (
+                                <img src={parcelPilotLogo} alt="ParcelPilot Logo" className="h-7 w-7 object-contain select-none" />
+                            )}
                             title="ParcelPilot AI Copilot"
                             description="Secure agent console initialized. Ask questions about shipments, policies, or initiate transactional proposals."
                         />
@@ -356,7 +380,9 @@ export default function ChatPanel({
                             <div
                                 className={`px-4 py-3.5 rounded-2xl text-base leading-relaxed ${m.role === 'user'
                                     ? 'bg-emerald-650 text-slate-800 font-bold rounded-tr-none'
-                                    : 'bg-slate-50 border border-border text-slate-800 rounded-tl-none shadow-sm'
+                                    : msgText.startsWith('⚠️')
+                                        ? 'bg-rose-50 border border-rose-250 text-rose-950 rounded-tl-none shadow-sm shadow-rose-100/50'
+                                        : 'bg-slate-50 border border-border text-slate-800 rounded-tl-none shadow-sm'
                                     }`}
                             >
                                 {/* Copy to Clipboard button float */}
@@ -585,30 +611,55 @@ export default function ChatPanel({
                         {liveToolCalls.length > 0 && (
                             <div className="space-y-2 pl-5">
                                 <div className="text-[10px] uppercase font-bold text-slate-400 font-sans tracking-wide">Live Tool Executions:</div>
-                                {liveToolCalls.map((tc, idx) => (
-                                    <div key={idx} className="flex flex-col text-[11px] font-mono text-slate-650 bg-white p-2.5 rounded-lg border border-border shadow-sm animate-fade-in">
-                                        <div className="flex items-center justify-between font-bold text-slate-705">
-                                            <span className="flex items-center space-x-1.5">
-                                                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-ping"></span>
-                                                <span className="text-emerald-700">🔧 {tc.tool_name}()</span>
-                                            </span>
-                                            {tc.output === 'running...' ? (
-                                                <span className="text-[9px] font-bold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200">RUNNING</span>
-                                            ) : (
-                                                <span className="text-[9px] font-bold text-emerald-700 bg-green-50 px-1.5 py-0.5 rounded border border-green-200">COMPLETED</span>
+                                {liveToolCalls.map((tc, idx) => {
+                                    const isRunning = tc.output === 'running...';
+                                    const isFailed = (() => {
+                                        if (!tc.output || typeof tc.output !== 'string') return false;
+                                        const trimmed = tc.output.trim();
+                                        if (trimmed.startsWith('{"error":')) return true;
+                                        try {
+                                            const parsed = JSON.parse(trimmed);
+                                            return parsed && (parsed.error !== undefined || parsed.status === 'error' || parsed.status === 'FAILED');
+                                        } catch (e) {
+                                            return trimmed.toLowerCase().includes('error');
+                                        }
+                                    })();
+
+                                    let dotColorClass = 'bg-emerald-500';
+                                    let dotAnimationClass = '';
+                                    if (isRunning) {
+                                        dotAnimationClass = 'animate-pulse';
+                                    } else if (isFailed) {
+                                        dotColorClass = 'bg-red-500';
+                                    }
+
+                                    return (
+                                        <div key={idx} className="flex flex-col text-[11px] font-mono text-slate-650 bg-white p-2.5 rounded-lg border border-border shadow-sm animate-fade-in">
+                                            <div className="flex items-center justify-between font-bold text-slate-705">
+                                                <span className="flex items-center space-x-1.5">
+                                                    <span className={`w-1.5 h-1.5 rounded-full ${dotColorClass} ${dotAnimationClass}`}></span>
+                                                    <span className={isFailed ? "text-red-700" : "text-emerald-700"}>🔧 {tc.tool_name}()</span>
+                                                </span>
+                                                {isRunning ? (
+                                                    <span className="text-[9px] font-bold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200">RUNNING</span>
+                                                ) : isFailed ? (
+                                                    <span className="text-[9px] font-bold text-red-600 bg-red-50 px-1.5 py-0.5 rounded border border-red-200">FAILED</span>
+                                                ) : (
+                                                    <span className="text-[9px] font-bold text-emerald-700 bg-green-50 px-1.5 py-0.5 rounded border border-green-200">COMPLETED</span>
+                                                )}
+                                            </div>
+                                            <div className="text-[10px] text-slate-400 mt-1 font-medium select-all">Args: {JSON.stringify(tc.args)}</div>
+                                            {!isRunning && (
+                                                <div className="text-[10px] text-slate-500 mt-1 italic border-t border-slate-50 pt-1">
+                                                    Output: {typeof tc.output === 'string'
+                                                        ? (tc.output.length > 80 ? tc.output.substring(0, 80) + '...' : tc.output)
+                                                        : (JSON.stringify(tc.output).length > 80 ? JSON.stringify(tc.output).substring(0, 80) + '...' : JSON.stringify(tc.output))
+                                                    }
+                                                </div>
                                             )}
                                         </div>
-                                        <div className="text-[10px] text-slate-400 mt-1 font-medium select-all">Args: {JSON.stringify(tc.args)}</div>
-                                        {tc.output !== 'running...' && (
-                                            <div className="text-[10px] text-slate-500 mt-1 italic border-t border-slate-50 pt-1">
-                                                Output: {typeof tc.output === 'string'
-                                                    ? (tc.output.length > 80 ? tc.output.substring(0, 80) + '...' : tc.output)
-                                                    : (JSON.stringify(tc.output).length > 80 ? JSON.stringify(tc.output).substring(0, 80) + '...' : JSON.stringify(tc.output))
-                                                }
-                                            </div>
-                                        )}
-                                    </div>
-                                ))}
+                                    );
+                                })}
                             </div>
                         )}
                     </div>

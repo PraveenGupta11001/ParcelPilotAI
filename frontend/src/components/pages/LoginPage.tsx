@@ -1,15 +1,16 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import parcelPilotLogo from '../../assets/ParcelPilotLogo.png';
+import parcelPilotLogo from '../../assets/parcelpilot.png';
 import { Button, TextInput } from '../ui';
 
 interface LoginPageProps {
     API_URL: string;
-    setToken: (token: string) => void;
+    setToken: (token: string | null) => void;
+    setRefreshToken: (token: string | null) => void;
     setUser: (user: any) => void;
 }
 
-export default function LoginPage({ API_URL, setToken, setUser }: LoginPageProps) {
+export default function LoginPage({ API_URL, setToken, setRefreshToken, setUser }: LoginPageProps) {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [loginError, setLoginError] = useState('');
@@ -30,9 +31,11 @@ export default function LoginPage({ API_URL, setToken, setUser }: LoginPageProps
             });
             if (res.ok) {
                 const data = await res.json();
-                localStorage.setItem('token', data.access_token);
+                localStorage.setItem('access_token', data.access_token);
+                localStorage.setItem('refresh_token', data.refresh_token);
                 localStorage.setItem('user', JSON.stringify(data.user));
                 setToken(data.access_token);
+                setRefreshToken(data.refresh_token);
                 setUser(data.user);
 
                 // Navigation: if customer, go to /chat, if internal, go to /chat (or dashboard)
@@ -59,11 +62,12 @@ export default function LoginPage({ API_URL, setToken, setUser }: LoginPageProps
 
     return (
         <div className="min-h-screen flex flex-col items-center justify-center p-4 bg-login-bg text-foreground font-sans z-10">
-            <img src={parcelPilotLogo} alt="ParcelPilot AI" className="w-16 h-16 mb-4 rounded-full shadow-lg" />
             <div className="w-full max-w-md bg-white border border-border rounded-2xl shadow-xl p-8 relative z-10">
-
-                <h2 className="text-2xl font-black text-center tracking-tight mb-1 text-slate-800">ParcelPilot Support</h2>
-                <p className="text-xs text-muted-foreground font-medium text-center mb-2">Good helper, one place for all parcel‑related queries.</p>
+                <div className="flex flex-col items-center mb-6">
+                    <img src={parcelPilotLogo} alt="ParcelPilot AI" className="w-24 h-24 mb-4 rounded-full shadow-lg bg-white p-1.5 object-contain" />
+                    <h2 className="text-2xl font-black text-center tracking-tight mb-1 text-slate-800">ParcelPilot Support</h2>
+                    <p className="text-xs text-muted-foreground font-medium text-center">Good helper, one place for all parcel‑related queries.</p>
+                </div>
 
                 <form onSubmit={handleLogin} className="space-y-4">
                     <div>
@@ -75,6 +79,7 @@ export default function LoginPage({ API_URL, setToken, setUser }: LoginPageProps
                             inputClassName="text-xs font-bold"
                             placeholder="eg: maya@parcelpilot.ai"
                             required
+                            autoFocus
                         />
                     </div>
                     <div>

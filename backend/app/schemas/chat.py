@@ -22,7 +22,7 @@ class ChatRequest(BaseModel):
     """
     message: str
     chat_history: List[ChatMessageSchema]
-    session_id: Optional[int] = None
+    session_id: Optional[str] = None
     stream: Optional[bool] = False
 
 class CreateSessionRequest(BaseModel):

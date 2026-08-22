@@ -26,3 +26,6 @@ class RegisterRequest(BaseModel):
     password: str
     role: str  # customer, internal_support, internal_lead
     account_id: Optional[str] = None
+
+class RefreshTokenRequest(BaseModel):
+    refresh_token: str

@@ -3,6 +3,7 @@ from sqlalchemy.orm import relationship
 from pgvector.sqlalchemy import Vector
 from .session import Base
 import datetime
+import uuid
 
 class Account(Base):
     __tablename__ = "accounts"
@@ -64,6 +65,7 @@ class User(Base):
     full_name = Column(String, nullable=False)
     email = Column(String, unique=True, nullable=False)
     password_hash = Column(String, nullable=False)
+    refresh_key = Column(String, nullable=True)
 
 class Escalation(Base):
     __tablename__ = "escalations"
@@ -74,7 +76,7 @@ class Escalation(Base):
     reason = Column(Text, nullable=False)
     amount = Column(Float, nullable=True)  # credit amount if service credit proposed
     status = Column(String, default="PENDING")  # PENDING, APPROVED, REJECTED
-    created_at = Column(DateTime(timezone=True), default=datetime.datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.datetime.now(datetime.UTC))
     
     ticket = relationship("Ticket", back_populates="escalations")
 
@@ -100,7 +102,7 @@ class AuditLog(Base):
     tool_name = Column(String, nullable=False)
     input = Column(Text, nullable=False)
     output = Column(Text, nullable=False)
-    timestamp = Column(DateTime(timezone=True), default=datetime.datetime.utcnow)
+    timestamp = Column(DateTime(timezone=True), default=lambda: datetime.datetime.now(datetime.UTC))
 
 class PendingAction(Base):
     __tablename__ = "pending_actions"
@@ -113,17 +115,17 @@ class PendingAction(Base):
     amount = Column(Float, nullable=True)
     reason = Column(Text, nullable=False)
     status = Column(String, default="PENDING")  # PENDING, APPROVED, REJECTED
-    created_at = Column(DateTime(timezone=True), default=datetime.datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.datetime.now(datetime.UTC))
 
 
 class ChatSession(Base):
     __tablename__ = "chat_sessions"
     
-    id = Column(Integer, primary_key=True, autoincrement=True)
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     user_id = Column(String, ForeignKey("users.user_id"), nullable=False)
     title = Column(String, nullable=False)
-    created_at = Column(DateTime(timezone=True), default=datetime.datetime.utcnow)
-    updated_at = Column(DateTime(timezone=True), default=datetime.datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.datetime.now(datetime.UTC))
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.datetime.now(datetime.UTC))
     
     user = relationship("User")
     messages = relationship("ChatMessage", back_populates="session", cascade="all, delete-orphan")
@@ -133,11 +135,11 @@ class ChatMessage(Base):
     __tablename__ = "chat_messages"
     
     id = Column(Integer, primary_key=True, autoincrement=True)
-    session_id = Column(Integer, ForeignKey("chat_sessions.id", ondelete="CASCADE"), nullable=False)
+    session_id = Column(String(36), ForeignKey("chat_sessions.id", ondelete="CASCADE"), nullable=False)
     sender = Column(String, nullable=False)  # user, bot
     text = Column(Text, nullable=False)
     tool_calls = Column(Text, nullable=True)  # Store JSON logs if any
-    created_at = Column(DateTime(timezone=True), default=datetime.datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.datetime.now(datetime.UTC))
     
     session = relationship("ChatSession", back_populates="messages")
 

@@ -25,6 +25,9 @@ ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 VOYAGE_API_KEY = os.getenv("VOYAGE_API_KEY")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+GROQ_API_KEY_BACKUP = os.getenv("GROQ_API_KEY_BACKUP")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+
 
 # Snapshot reference datetime: 2026-08-16 11:00 Asia/Kolkata (IST = UTC+5:30)
 # Express in tz-aware format for calculations

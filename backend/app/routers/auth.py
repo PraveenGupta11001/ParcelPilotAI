@@ -5,8 +5,8 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.db.models import User
-from app.schemas.auth import RegisterRequest, LoginRequest
-from app.auth.jwt import create_access_token
+from app.schemas.auth import RegisterRequest, LoginRequest, RefreshTokenRequest
+from app.auth.jwt import create_access_token, create_refresh_token, decode_access_token
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -57,17 +57,18 @@ def register_user(req: RegisterRequest, db: Session = Depends(get_db)):
     }
 
 @router.post("/mock-login")
-def mock_login(req: LoginRequest, db: Session = Depends(get_db)):
+@router.post("/login")
+def login(req: LoginRequest, db: Session = Depends(get_db)):
     """Logs in an existing user using bcrypt password validation.
 
-    Generates a secure JWT access token upon successful authentication.
+    Generates secure JWT access and refresh tokens upon successful authentication.
 
     Args:
         req: LoginRequest schema containing credentials (email, password).
         db: Database session.
 
     Returns:
-        dict: A dictionary containing the JWT access token and logged-in user profile details.
+        dict: A dictionary containing the access token, refresh token, and logged-in user profile details.
 
     Raises:
         HTTPException: 401 Unauthorized if verification fails or the user does not exist.
@@ -85,9 +86,15 @@ def mock_login(req: LoginRequest, db: Session = Depends(get_db)):
             detail="Invalid email or password."
         )
         
-    token = create_access_token({"sub": user.user_id})
+    access_token = create_access_token({"sub": user.user_id})
+    refresh_token = create_refresh_token({"sub": user.user_id})
+    
+    user.refresh_key = refresh_token
+    db.commit()
+    
     return {
-        "access_token": token,
+        "access_token": access_token,
+        "refresh_token": refresh_token,
         "token_type": "bearer",
         "user": {
             "user_id": user.user_id,
@@ -96,4 +103,36 @@ def mock_login(req: LoginRequest, db: Session = Depends(get_db)):
             "account_id": user.account_id,
             "full_name": user.full_name
         }
+    }
+
+@router.post("/refresh")
+def refresh(req: RefreshTokenRequest, db: Session = Depends(get_db)):
+    """Refreshes credentials using a valid refresh token.
+
+    Validates refresh token authenticity, ensures matches the stored key for the user in database, and issues fresh rotated credentials.
+    """
+    payload = decode_access_token(req.refresh_token)
+    if not payload or payload.get("type") != "refresh":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid refresh token."
+        )
+    user_id = payload.get("sub")
+    user = db.query(User).filter(User.user_id == user_id).first()
+    if not user or user.refresh_key != req.refresh_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session expired or invalid refresh token."
+        )
+    
+    new_access_token = create_access_token({"sub": user.user_id})
+    new_refresh_token = create_refresh_token({"sub": user.user_id})
+    
+    user.refresh_key = new_refresh_token
+    db.commit()
+    
+    return {
+        "access_token": new_access_token,
+        "refresh_token": new_refresh_token,
+        "token_type": "bearer"
     }

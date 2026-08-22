@@ -5,11 +5,12 @@ import { Button, TextInput, Select } from '../ui';
 
 interface RegisterPageProps {
     API_URL: string;
-    setToken: (token: string) => void;
+    setToken: (token: string | null) => void;
+    setRefreshToken: (token: string | null) => void;
     setUser: (user: any) => void;
 }
 
-export default function RegisterPage({ API_URL, setToken, setUser }: RegisterPageProps) {
+export default function RegisterPage({ API_URL, setToken, setRefreshToken, setUser }: RegisterPageProps) {
     const [fullName, setFullName] = useState('');
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
@@ -49,9 +50,11 @@ export default function RegisterPage({ API_URL, setToken, setUser }: RegisterPag
 
                 if (loginRes.ok) {
                     const data = await loginRes.json();
-                    localStorage.setItem('token', data.access_token);
+                    localStorage.setItem('access_token', data.access_token);
+                    localStorage.setItem('refresh_token', data.refresh_token);
                     localStorage.setItem('user', JSON.stringify(data.user));
                     setToken(data.access_token);
+                    setRefreshToken(data.refresh_token);
                     setUser(data.user);
                     setTimeout(() => {
                         navigate('/chat');
