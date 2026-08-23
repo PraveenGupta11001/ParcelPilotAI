@@ -2,7 +2,7 @@ from sqlalchemy.orm import Session
 from fastapi import HTTPException, status
 from app.db.models import User, PendingAction, Order, Ticket
 from app.tools.structured_data import calculate_order_metrics
-
+import uuid, datetime
 def propose_action(
     db: Session,
     user: User,
@@ -62,8 +62,27 @@ def propose_action(
         amount = metrics["fee_inr"]
 
     elif action_type == "ISSUE_CREDIT":
-        if not order_id or not ticket_id:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Order ID and Ticket ID are required for service credits.")
+        if not order_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Order ID is required for service credits.")
+        # Auto‑create a ticket if none provided
+        if not ticket_id:
+            new_ticket_id = f"TKT-{uuid.uuid4().hex[:8].upper()}"
+            new_ticket = Ticket(
+                ticket_id=new_ticket_id,
+                account_id=order.account_id,
+                created_at=datetime.datetime.now(datetime.timezone.utc),
+                status="OPEN",
+                subject=f"Service credit for order {order_id}",
+                description=reason,
+                channel="chat",
+                assigned_to=None,
+                last_customer_message_at=datetime.datetime.now(datetime.timezone.utc),
+                historical_resolution="",
+            )
+            db.add(new_ticket)
+            db.flush()  # get ID without committing full transaction
+            ticket_id = new_ticket_id
+        metrics = calculate_order_metrics(order, "service_credit")
         metrics = calculate_order_metrics(order, "service_credit")
         
         # Verify eligibility
