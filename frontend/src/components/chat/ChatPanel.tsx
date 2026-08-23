@@ -496,7 +496,7 @@ export default function ChatPanel({
                                                                     setConfirmActionType(parsed.action_type || 'Action');
                                                                     setConfirmOpen(true);
                                                                 }}
-                                                                className="flex-1 py-1.5 bg-emerald-650 text-white font-bold text-xs rounded hover:bg-emerald-700 transition-colors cursor-pointer"
+                                                                className="flex-1 py-1.5 bg-emerald-600 text-white font-bold text-xs rounded hover:bg-emerald-700 transition-colors cursor-pointer"
                                                             >
                                                                 Confirm Action
                                                             </button>

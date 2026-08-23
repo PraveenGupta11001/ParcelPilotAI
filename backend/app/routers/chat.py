@@ -415,13 +415,43 @@ def get_session_messages(
     if session.user_id != current_user.user_id and current_user.role == "customer":
         raise HTTPException(status_code=403, detail="Access denied: Cannot read other users' sessions.")
         
-    return [
-        {
+    messages_out = []
+    for m in session.messages:
+        tcs = None
+        if m.tool_calls:
+            try:
+                tcs = json.loads(m.tool_calls)
+                if isinstance(tcs, list):
+                    for tc in tcs:
+                        if tc.get("tool_name") == "propose_action" or tc.get("name") == "propose_action":
+                            output_field = tc.get("output")
+                            if output_field:
+                                try:
+                                    if isinstance(output_field, str):
+                                        output_dict = json.loads(output_field)
+                                    else:
+                                        output_dict = output_field
+                                        
+                                    p_id = output_dict.get("proposal_id")
+                                    if p_id:
+                                        action_rec = db.query(PendingAction).filter(PendingAction.id == p_id).first()
+                                        if action_rec:
+                                            output_dict["status"] = action_rec.status
+                                            if isinstance(output_field, str):
+                                                tc["output"] = json.dumps(output_dict)
+                                            else:
+                                                tc["output"] = output_dict
+                                except Exception as inner_ex:
+                                    pass
+            except Exception as ex:
+                tcs = None
+                
+        messages_out.append({
             "id": m.id,
             "sender": m.sender,
             "text": m.text,
-            "tool_calls": json.loads(m.tool_calls) if m.tool_calls else None,
+            "tool_calls": tcs,
             "created_at": m.created_at
-        }
-        for m in session.messages
-    ]
+        })
+        
+    return messages_out
