@@ -117,6 +117,9 @@ def upload_document(
     authority_level = 1 if target_scope != "general" else 2
     eff_date = datetime.date.today()
     
+    # Delete existing chunks with the same filename to prevent stale duplicate scope/chunks
+    db.query(DocumentChunk).filter(DocumentChunk.document_name == filename).delete()
+
     for idx, chunk_txt in enumerate(chunks):
         embed_vector = get_embedding(chunk_txt)
         chunk_model = DocumentChunk(
