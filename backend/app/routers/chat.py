@@ -286,6 +286,11 @@ def chat_confirm(
             order.notes = (order.notes or "") + f"\nCancelled via Proposal #{action.id} by {current_user.user_id}."
             
     elif action.action_type == "ISSUE_CREDIT":
+        if not action.ticket_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot issue service credit: associated Ticket ID is missing from this proposal."
+            )
         ticket = db.query(Ticket).filter(Ticket.ticket_id == action.ticket_id).first()
         if ticket:
             ticket.status = "RESOLVED"
@@ -302,6 +307,11 @@ def chat_confirm(
         db.add(esc)
         
     elif action.action_type == "ESCALATE_TICKET":
+        if not action.ticket_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot escalate ticket: associated Ticket ID is missing from this proposal."
+            )
         ticket = db.query(Ticket).filter(Ticket.ticket_id == action.ticket_id).first()
         if ticket:
             ticket.status = "ESCALATED"

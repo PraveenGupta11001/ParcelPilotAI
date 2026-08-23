@@ -79,6 +79,10 @@ def propose_action(
         # Capture computed amount if client didn't supply one, or override
         amount = metrics["credit_inr"] if amount is None else amount
 
+    elif action_type == "ESCALATE_TICKET":
+        if not ticket_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Ticket ID is required for ticket escalations.")
+
     # 3. Create PendingAction record
     pending = PendingAction(
         user_id=user.user_id,
