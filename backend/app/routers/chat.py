@@ -92,6 +92,8 @@ def chat(
         def stream_generator():
             from app.db.session import SessionLocal
             gen_db = SessionLocal()
+            stream_agent = None
+            final_text = ""
             try:
                 # Retrieve a fresh user instance tied to this generator's session context
                 fresh_user = gen_db.query(User).filter(User.user_id == caller_user_id).first()
@@ -102,7 +104,6 @@ def chat(
                 if not req.session_id:
                     yield f"data: {json.dumps({'event': 'session_created', 'session_id': session_id})}\n\n"
                 
-                final_text = ""
                 for step in stream_agent.run_agent_stream(history_list, req.message):
                     yield f"data: {json.dumps(step)}\n\n"
                     if step.get("event") == "done":
@@ -124,17 +125,38 @@ def chat(
                 if db_session:
                     db_session.updated_at = SNAPSHOT_DATETIME
                 gen_db.commit()
+            except GeneratorExit:
+                # Client disconnected before stream finished. Commit database message anyway.
+                if stream_agent:
+                    if not final_text:
+                        if stream_agent.trace:
+                            final_text = "I have drafted the request in the background. Please see the historical traces."
+                        else:
+                            final_text = "Connection interrupted. Please resend if needed."
+                    tool_calls_str = json.dumps(stream_agent.trace) if stream_agent.trace else None
+                    bot_msg_db = ChatMessage(
+                        session_id=session_id,
+                        sender="bot",
+                        text=final_text,
+                        tool_calls=tool_calls_str,
+                        created_at=SNAPSHOT_DATETIME
+                    )
+                    gen_db.add(bot_msg_db)
+                    db_session = gen_db.query(ChatSession).filter(ChatSession.id == session_id).first()
+                    if db_session:
+                        db_session.updated_at = SNAPSHOT_DATETIME
+                    gen_db.commit()
             except RateLimitExceededException as rle:
                 error_text = str(rle)
                 yield f"data: {json.dumps({'event': 'text', 'text': error_text})}\n\n"
-                yield f"data: {json.dumps({'event': 'done', 'text_response': error_text, 'tool_calls': stream_agent.trace})}\n\n"
+                t_str = json.dumps(stream_agent.trace) if (stream_agent and stream_agent.trace) else None
+                yield f"data: {json.dumps({'event': 'done', 'text_response': error_text, 'tool_calls': t_str})}\n\n"
                 
-                tool_calls_str = json.dumps(stream_agent.trace) if stream_agent.trace else None
                 bot_msg_db = ChatMessage(
                     session_id=session_id,
                     sender="bot",
                     text=error_text,
-                    tool_calls=tool_calls_str,
+                    tool_calls=t_str,
                     created_at=SNAPSHOT_DATETIME
                 )
                 gen_db.add(bot_msg_db)
@@ -145,6 +167,20 @@ def chat(
                 gen_db.commit()
             except Exception as e:
                 yield f"data: {json.dumps({'event': 'status', 'message': f'Internal agent error: {str(e)}'})}\n\n"
+                error_msg = f"⚠️ **Internal Agent Error**: {str(e)}"
+                t_str = json.dumps(stream_agent.trace) if (stream_agent and stream_agent.trace) else None
+                bot_msg_db = ChatMessage(
+                    session_id=session_id,
+                    sender="bot",
+                    text=error_msg,
+                    tool_calls=t_str,
+                    created_at=SNAPSHOT_DATETIME
+                )
+                gen_db.add(bot_msg_db)
+                db_session = gen_db.query(ChatSession).filter(ChatSession.id == session_id).first()
+                if db_session:
+                    db_session.updated_at = SNAPSHOT_DATETIME
+                gen_db.commit()
             finally:
                 gen_db.close()
 
