@@ -617,14 +617,14 @@ export default function ChatPanel({
                                                             >
                                                                 Confirm Action
                                                             </button>
-                                                            <button
+                                                            {/* <button
                                                                 onClick={() => {
                                                                     toast.info('Proposal rejected locally.');
                                                                 }}
                                                                 className="px-3 py-1.5 bg-white border border-border text-slate-600 hover:text-slate-900 text-xs rounded transition-colors cursor-pointer"
                                                             >
                                                                 Reject
-                                                            </button>
+                                                            </button> */}
                                                         </div>
                                                     )}
                                                 </div>

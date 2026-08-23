@@ -180,22 +180,31 @@ def delete_document(
     """Deletes a document (all its chunks) from the database context.
     Enforces scope-based security permissions for customers vs internal support.
     """
-    chunks = db.query(DocumentChunk).filter(DocumentChunk.document_name == filename).all()
-    if not chunks:
-        raise HTTPException(status_code=404, detail="Document not found.")
+    query = db.query(DocumentChunk).filter(DocumentChunk.document_name == filename)
+    if current_user.role == "customer":
+        exists_check = query.first()
+        if not exists_check:
+            raise HTTPException(status_code=404, detail="Document not found.")
+        
+        user_chunks = query.filter(DocumentChunk.scope == current_user.account_id).all()
+        if not user_chunks:
+            raise HTTPException(
+                status_code=403,
+                detail="Access denied: Customers can only delete documents scoped to their own account."
+            )
+        
+        # Delete only chunks matching customer's scope
+        db.query(DocumentChunk).filter(
+            DocumentChunk.document_name == filename,
+            DocumentChunk.scope == current_user.account_id
+        ).delete()
+    else:
+        exists_check = query.first()
+        if not exists_check:
+            raise HTTPException(status_code=404, detail="Document not found.")
+        query.delete()
 
-    for c in chunks:
-        if current_user.role == "customer":
-            if c.scope != current_user.account_id:
-                raise HTTPException(
-                    status_code=403,
-                    detail="Access denied: Customers can only delete documents scoped to their own account."
-                )
-
-    # Perform chunk deletion
-    db.query(DocumentChunk).filter(DocumentChunk.document_name == filename).delete()
     db.commit()
-
     return {
         "success": True,
         "message": f"Successfully deleted document '{filename}' from database."
@@ -223,14 +232,20 @@ def get_uploaded_document_content(
     Raises:
         HTTPException: 404 if the document is not found, 403 if security scope validation fails.
     """
-    chunks = db.query(DocumentChunk).filter(DocumentChunk.document_name == filename).order_by(DocumentChunk.chunk_index.asc()).all()
-    if not chunks:
+    query = db.query(DocumentChunk).filter(DocumentChunk.document_name == filename)
+    
+    # Check if the document exists anywhere in the database
+    exists_check = query.first()
+    if not exists_check:
         raise HTTPException(status_code=404, detail="Document not found.")
+
+    if current_user.role == "customer":
+        query = query.filter(DocumentChunk.scope.in_(["general", current_user.account_id]))
         
-    for c in chunks:
-        if current_user.role == "customer" and c.scope not in ["general", current_user.account_id]:
-            raise HTTPException(status_code=403, detail="Access denied: Not authorized to view this document.")
-            
+    chunks = query.order_by(DocumentChunk.chunk_index.asc()).all()
+    if not chunks:
+        raise HTTPException(status_code=403, detail="Access denied: Not authorized to view this document.")
+        
     return {
         "filename": filename,
         "scope": chunks[0].scope,
@@ -250,14 +265,17 @@ def download_document(
     import os
     from fastapi.responses import FileResponse
 
-    # Security check: if current_user.role is customer, check if document scope is accessible.
-    chunks = db.query(DocumentChunk).filter(DocumentChunk.document_name == filename).all()
-    if not chunks:
+    query = db.query(DocumentChunk).filter(DocumentChunk.document_name == filename)
+    exists_check = query.first()
+    if not exists_check:
         raise HTTPException(status_code=404, detail="Document metadata not found in system.")
-        
-    for c in chunks:
-        if current_user.role == "customer" and c.scope not in ["general", current_user.account_id]:
-            raise HTTPException(status_code=403, detail="Access denied: Not authorized to access this document.")
+
+    if current_user.role == "customer":
+        query = query.filter(DocumentChunk.scope.in_(["general", current_user.account_id]))
+
+    chunks = query.all()
+    if not chunks:
+        raise HTTPException(status_code=403, detail="Access denied: Not authorized to access this document.")
 
     # Locate page in Data directory
     data_dir = "/home/praveen/my_projects/ParcelPilot_Customer_Support/Data"
