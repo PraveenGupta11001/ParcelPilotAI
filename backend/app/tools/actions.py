@@ -101,6 +101,17 @@ def propose_action(
     elif action_type == "ESCALATE_TICKET":
         if not ticket_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Ticket ID is required for ticket escalations.")
+        # Guard: prevent creating another pending escalation for the same ticket
+        existing_pending = db.query(PendingAction).filter(
+            PendingAction.action_type == "ESCALATE_TICKET",
+            PendingAction.ticket_id == ticket_id,
+            PendingAction.status == "PENDING"
+        ).first()
+        if existing_pending:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Pending escalation already exists for ticket {ticket_id} (proposal #{existing_pending.id})."
+            )
 
     # 3. Create PendingAction record
     pending = PendingAction(
