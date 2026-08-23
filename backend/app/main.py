@@ -6,7 +6,7 @@ warnings.filterwarnings("ignore", message=".*utcnow.*")
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.routers import auth, chat, documents, insights
+from app.routers import auth, chat, documents, insights, db
 
 from app.config import ALLOWED_ORIGINS
 
@@ -26,6 +26,7 @@ app.include_router(auth.router)
 app.include_router(chat.router)
 app.include_router(documents.router)
 app.include_router(insights.router)
+app.include_router(db.router)
 
 @app.get("/")
 def health_check():
