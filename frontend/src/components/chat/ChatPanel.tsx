@@ -93,7 +93,14 @@ export default function ChatPanel({
     const [confirmActionType, setConfirmActionType] = useState('');
     const [confirmLoading, setConfirmLoading] = useState(false);
 
+    // Smart background polling states
+    const pollingIntervalRef = useRef<any>(null);
+
     const isCreatingSessionRef = useRef(false);
+    const activeSessionIdRef = useRef(activeSessionId);
+    useEffect(() => {
+        activeSessionIdRef.current = activeSessionId;
+    }, [activeSessionId]);
     const chatInputRef = useRef<HTMLInputElement>(null);
 
     // Auto-focus on input element when loading completes or session changes
@@ -111,6 +118,15 @@ export default function ChatPanel({
         scrollRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, [messages, loadingChat]);
 
+    // Cleanup polling on unmount
+    useEffect(() => {
+        return () => {
+            if (pollingIntervalRef.current) {
+                clearInterval(pollingIntervalRef.current);
+            }
+        };
+    }, []);
+
     // Load message logs if session ID is set
     useEffect(() => {
         if (activeSessionId) {
@@ -124,7 +140,71 @@ export default function ChatPanel({
         }
     }, [activeSessionId]);
 
+    const startPolling = (sessionId: string) => {
+        if (pollingIntervalRef.current) clearInterval(pollingIntervalRef.current);
+
+        let attempts = 0;
+        setLoadingChat(true);
+        setReasoningStatus('Resuming response from background task...');
+
+        pollingIntervalRef.current = setInterval(async () => {
+            attempts++;
+            if (activeSessionIdRef.current !== sessionId) {
+                clearInterval(pollingIntervalRef.current);
+                pollingIntervalRef.current = null;
+                return;
+            }
+
+            if (attempts > 40) { // Timeout after 2 minutes of polling
+                clearInterval(pollingIntervalRef.current);
+                pollingIntervalRef.current = null;
+                setLoadingChat(false);
+                setReasoningStatus('');
+                setMessages(prev => [...prev, {
+                    id: 'poll-timeout-' + Date.now(),
+                    role: 'assistant',
+                    content: '⚠️ **The background task timed out or was terminated. Please resend your message if needed.**'
+                }]);
+                return;
+            }
+
+            try {
+                const res = await fetch(`${API_URL}/chat/sessions/${sessionId}/messages`, {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+                if (res.ok) {
+                    const data = await res.json();
+                    const formatted = data.map((m: any) => ({
+                        id: m.id.toString(),
+                        role: m.sender === 'user' ? 'user' : 'assistant',
+                        content: m.text,
+                        tool_calls: m.tool_calls
+                    }));
+
+                    if (formatted.length > 0 && formatted[formatted.length - 1].role === 'assistant') {
+                        clearInterval(pollingIntervalRef.current);
+                        pollingIntervalRef.current = null;
+                        setMessages(formatted);
+                        setLoadingChat(false);
+                        setReasoningStatus('');
+                        if (user && user.role !== 'customer') {
+                            fetchInsights();
+                        }
+                    }
+                }
+            } catch (e) {
+                console.error('Failed to poll background task status', e);
+            }
+        }, 3000);
+    };
+
     const loadSessionMessages = async () => {
+        if (pollingIntervalRef.current) {
+            clearInterval(pollingIntervalRef.current);
+            pollingIntervalRef.current = null;
+        }
         setLoadingChat(true);
         try {
             const res = await fetch(`${API_URL}/chat/sessions/${activeSessionId}/messages`, {
@@ -134,7 +214,6 @@ export default function ChatPanel({
             });
             if (res.ok) {
                 const data = await res.json();
-                // Convert to standard format
                 const formatted = data.map((m: any) => ({
                     id: m.id.toString(),
                     role: m.sender === 'user' ? 'user' : 'assistant',
@@ -142,11 +221,18 @@ export default function ChatPanel({
                     tool_calls: m.tool_calls
                 }));
                 setMessages(formatted);
+
+                // If user is the last message sender, wait on background process via polling
+                if (formatted.length > 0 && formatted[formatted.length - 1].role === 'user' && activeSessionId) {
+                    startPolling(activeSessionId);
+                }
             }
         } catch (e) {
             console.error('Failed to load session message history', e);
         } finally {
-            setLoadingChat(false);
+            if (!pollingIntervalRef.current) {
+                setLoadingChat(false);
+            }
         }
     };
 
@@ -177,6 +263,14 @@ export default function ChatPanel({
         if (!activeSessionId) {
             isCreatingSessionRef.current = true;
         }
+
+        let actualStreamSessionId = activeSessionId || '';
+
+        // Helper to verify if the user is still looking at the session that started the request
+        const isCurrent = () => {
+            return activeSessionIdRef.current === actualStreamSessionId ||
+                (actualStreamSessionId === '' && (activeSessionIdRef.current === undefined || activeSessionIdRef.current === ''));
+        };
 
         try {
             const formattedHistory = messages.map(m => ({
@@ -210,7 +304,10 @@ export default function ChatPanel({
                     content: '',
                     tool_calls: []
                 };
-                setMessages(prev => [...prev, assistantMsg]);
+
+                if (isCurrent()) {
+                    setMessages(prev => [...prev, assistantMsg]);
+                }
 
                 if (reader) {
                     while (true) {
@@ -231,40 +328,54 @@ export default function ChatPanel({
 
                                 if (parsed.event === 'session_created') {
                                     const newSId = parsed.session_id.toString();
-                                    setActiveSessionId(newSId);
+                                    actualStreamSessionId = newSId;
+                                    if (activeSessionIdRef.current === undefined || activeSessionIdRef.current === '') {
+                                        activeSessionIdRef.current = newSId;
+                                        setActiveSessionId(newSId);
+                                    }
                                     window.history.pushState(null, '', `/chat/${newSId}`);
                                     fetchSessions();
                                 } else if (parsed.event === 'status') {
-                                    setReasoningStatus(parsed.message);
+                                    if (isCurrent()) {
+                                        setReasoningStatus(parsed.message);
+                                    }
                                 } else if (parsed.event === 'tool_call') {
-                                    setReasoningStatus(`Executing ${parsed.name}...`);
-                                    setLiveToolCalls(prev => {
-                                        if (prev.some(tc => tc.tool_name === parsed.name && JSON.stringify(tc.args) === JSON.stringify(parsed.args))) {
-                                            return prev;
-                                        }
-                                        return [...prev, {
-                                            tool_name: parsed.name,
-                                            args: parsed.args,
-                                            output: 'running...'
-                                        }];
-                                    });
+                                    if (isCurrent()) {
+                                        setReasoningStatus(`Executing ${parsed.name}...`);
+                                        setLiveToolCalls(prev => {
+                                            if (prev.some(tc => tc.tool_name === parsed.name && JSON.stringify(tc.args) === JSON.stringify(parsed.args))) {
+                                                return prev;
+                                            }
+                                            return [...prev, {
+                                                tool_name: parsed.name,
+                                                args: parsed.args,
+                                                output: 'running...'
+                                            }];
+                                        });
+                                    }
                                 } else if (parsed.event === 'tool_result') {
-                                    setReasoningStatus(`Completed ${parsed.name} execution`);
-                                    setLiveToolCalls(prev => prev.map(tc =>
-                                        tc.tool_name === parsed.name ? { ...tc, output: parsed.output } : tc
-                                    ));
+                                    if (isCurrent()) {
+                                        setReasoningStatus(`Completed ${parsed.name} execution`);
+                                        setLiveToolCalls(prev => prev.map(tc =>
+                                            tc.tool_name === parsed.name ? { ...tc, output: parsed.output } : tc
+                                        ));
+                                    }
                                 } else if (parsed.event === 'text') {
-                                    setMessages(prev => prev.map(m =>
-                                        m.id === assistantMsgId ? { ...m, content: parsed.text } : m
-                                    ));
+                                    if (isCurrent()) {
+                                        setMessages(prev => prev.map(m =>
+                                            m.id === assistantMsgId ? { ...m, content: parsed.text } : m
+                                        ));
+                                    }
                                 } else if (parsed.event === 'done') {
-                                    setMessages(prev => prev.map(m =>
-                                        m.id === assistantMsgId ? {
-                                            ...m,
-                                            content: parsed.text_response,
-                                            tool_calls: parsed.tool_calls
-                                        } : m
-                                    ));
+                                    if (isCurrent()) {
+                                        setMessages(prev => prev.map(m =>
+                                            m.id === assistantMsgId ? {
+                                                ...m,
+                                                content: parsed.text_response,
+                                                tool_calls: parsed.tool_calls
+                                            } : m
+                                        ));
+                                    }
                                 }
                             } catch (e) {
                                 console.error('Failed to parse SSE JSON chunk', e);
@@ -273,28 +384,34 @@ export default function ChatPanel({
                     }
                 }
 
-                setLoadingChat(false);
-                setReasoningStatus('');
-                setLiveToolCalls([]);
+                if (isCurrent()) {
+                    setLoadingChat(false);
+                    setReasoningStatus('');
+                    setLiveToolCalls([]);
+                }
                 if (user && user.role !== 'customer') {
                     fetchInsights();
                 }
 
             } else {
+                if (isCurrent()) {
+                    setMessages(prev => [...prev, {
+                        id: Math.random().toString(),
+                        role: 'assistant',
+                        content: '⚠️ **Error: Failed to process query through the backend orchestrator.**\n\nThe server responded with an error status. Please check application settings or API logs.'
+                    }]);
+                    setLoadingChat(false);
+                }
+            }
+        } catch (e) {
+            if (isCurrent()) {
                 setMessages(prev => [...prev, {
                     id: Math.random().toString(),
                     role: 'assistant',
-                    content: '⚠️ **Error: Failed to process query through the backend orchestrator.**\n\nThe server responded with an error status. Please check application settings or API logs.'
+                    content: '⚠️ **Error: API server unreachable.**\n\nPlease check if the backend service is running normally.'
                 }]);
                 setLoadingChat(false);
             }
-        } catch (e) {
-            setMessages(prev => [...prev, {
-                id: Math.random().toString(),
-                role: 'assistant',
-                content: '⚠️ **Error: API server unreachable.**\n\nPlease check if the backend service is running normally.'
-            }]);
-            setLoadingChat(false);
         }
     };
 

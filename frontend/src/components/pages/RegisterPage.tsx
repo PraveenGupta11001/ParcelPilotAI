@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Shield } from 'lucide-react';
+import parcelPilotLogo from '../../assets/parcelpilot.png';
 import { Button, TextInput, Select } from '../ui';
 
 interface RegisterPageProps {
@@ -15,7 +15,7 @@ export default function RegisterPage({ API_URL, setToken, setRefreshToken, setUs
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [role, setRole] = useState('customer');
-    const [accountId, setAccountId] = useState('');
+    const [accountId, setAccountId] = useState('ACCT-001');
     const [errorMsg, setErrorMsg] = useState('');
     const [successMsg, setSuccessMsg] = useState('');
     const navigate = useNavigate();
@@ -76,10 +76,8 @@ export default function RegisterPage({ API_URL, setToken, setRefreshToken, setUs
     return (
         <div className="min-h-screen flex items-center justify-center p-4 bg-background text-foreground font-sans z-10">
             <div className="w-full max-w-md bg-white border border-border rounded-2xl shadow-xl p-8 relative z-10">
-                <div className="flex justify-center mb-6">
-                    <div className="p-3 bg-emerald-500/10 rounded-xl border border-emerald-500/20 flex items-center justify-center">
-                        <Shield className="h-7 w-7 text-emerald-600" />
-                    </div>
+                <div className="flex flex-col items-center justify-center mb-4">
+                    <img src={parcelPilotLogo} alt="ParcelPilot AI" className="w-20 h-20 mb-2 rounded-full shadow-md bg-white p-1 object-contain" />
                 </div>
                 <h2 className="text-2xl font-black text-center tracking-tight mb-1 text-slate-800">Create Account</h2>
                 <p className="text-xs text-muted-foreground font-medium text-center mb-8">
@@ -137,16 +135,19 @@ export default function RegisterPage({ API_URL, setToken, setRefreshToken, setUs
                     {role === 'customer' && (
                         <div>
                             <label className="block text-[10px] font-black text-muted-foreground uppercase tracking-widest mb-2">Account ID (SLA Scope)</label>
-                            <TextInput
-                                type="text"
+                            <Select
                                 value={accountId}
-                                onChange={(e: any) => setAccountId(e.target.value)}
-                                inputClassName="text-xs font-bold"
-                                placeholder="eg: ACCT-001 or ACCT-002"
-                                required
+                                onChange={(value: string) => setAccountId(value)}
+                                options={[
+                                    { value: 'ACCT-001', label: 'ACCT-001 (Northstar Logistics)' },
+                                    { value: 'ACCT-002', label: 'ACCT-002 (LumenWorks)' },
+                                    { value: 'ACCT-003', label: 'ACCT-003 (Beacon Retail)' },
+                                    { value: 'ACCT-004', label: 'ACCT-004 (Axis Corp)' }
+                                ]}
+                                className="text-xs font-bold"
                             />
-                            <span className="text-[10px] text-muted-foreground mt-1 block">
-                                Required for customer scoping constraints. E.g., ACCT-001 (Northstar) or ACCT-002 (LumenWorks)
+                            <span className="text-[10px] text-muted-foreground mt-2 block">
+                                Preconfigured client organization scope for security boundary checks.
                             </span>
                         </div>
                     )}

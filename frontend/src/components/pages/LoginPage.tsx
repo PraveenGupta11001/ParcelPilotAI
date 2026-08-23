@@ -61,7 +61,7 @@ export default function LoginPage({ API_URL, setToken, setRefreshToken, setUser 
     };
 
     return (
-        <div className="min-h-screen flex flex-col items-center justify-center p-4 bg-login-bg text-foreground font-sans z-10">
+        <div className="min-h-screen flex flex-col items-center justify-center p-4 text-foreground font-sans z-10">
             <div className="w-full max-w-md bg-white border border-border rounded-2xl shadow-xl p-8 relative z-10">
                 <div className="flex flex-col items-center mb-6">
                     <img src={parcelPilotLogo} alt="ParcelPilot AI" className="w-24 h-24 mb-4 rounded-full shadow-lg bg-white p-1.5 object-contain" />
