@@ -331,6 +331,68 @@ def chat_confirm(
     }
 
 
+@router.post("/reject")
+def chat_reject(
+    req: ConfirmRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Rejects a proposed pending customer support action.
+
+    Validates user scopes and updates the pending action status to REJECTED.
+
+    Args:
+        req: ConfirmRequest schema enclosing the target proposal_id.
+        current_user: Authenticated caller.
+        db: Database session.
+
+    Returns:
+        dict: Rejection status, description string, and completed action fields.
+
+    Raises:
+        HTTPException: 404 if the proposal ID does not exist, 400 if already processed, and
+                       403/Forbidden if security bounds check fail.
+    """
+    action = db.query(PendingAction).filter(PendingAction.id == req.proposal_id).first()
+    if not action:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Proposal action {req.proposal_id} not found."
+        )
+        
+    if action.status != "PENDING":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Action proposal has already been processed: status is {action.status}."
+        )
+
+    # 1. Enforce Customer Role Scoping boundaries
+    if current_user.role == "customer":
+        # Customers can ONLY reject their own proposals
+        if action.user_id != current_user.user_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Security violation: Cannot reject actions proposed by other users."
+            )
+
+    # 2. Apply state mutation transitions
+    action.status = "REJECTED"
+    db.commit()
+    
+    return {
+        "success": True,
+        "message": f"Successfully rejected {action.action_type} for proposal #{action.id}.",
+        "action": {
+            "proposal_id": action.id,
+            "action_type": action.action_type,
+            "status": action.status,
+            "order_id": action.order_id,
+            "ticket_id": action.ticket_id,
+            "amount": action.amount
+        }
+    }
+
+
 @router.get("/sessions")
 def get_sessions(
     current_user: User = Depends(get_current_user),

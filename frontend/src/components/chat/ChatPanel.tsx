@@ -467,6 +467,54 @@ export default function ChatPanel({
         }
     };
 
+    const handleRejectAction = async (proposalId: number, msgId: string) => {
+        try {
+            const res = await fetch(`${API_URL}/chat/reject`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify({ proposal_id: proposalId })
+            });
+
+            if (res.ok) {
+                const data = await res.json();
+                toast.success(data.message || `Successfully rejected proposal #${proposalId}`);
+
+                setMessages(prev => prev.map(m => {
+                    if (m.id === msgId && m.tool_calls) {
+                        const updatedTools = m.tool_calls.map(tc => {
+                            if (tc.tool_name === 'propose_action') {
+                                const parsed = JSON.parse(tc.output);
+                                if (parsed.proposal_id === proposalId) {
+                                    parsed.status = 'REJECTED';
+                                    return { ...tc, output: JSON.stringify(parsed) };
+                                }
+                            }
+                            return tc;
+                        });
+                        return {
+                            ...m,
+                            content: (m.content || '') + `\n\n❌ **Action Rejected!** ${data.message}`,
+                            tool_calls: updatedTools
+                        };
+                    }
+                    return m;
+                }));
+
+                if (user && user.role !== 'customer') {
+                    fetchInsights();
+                }
+            } else {
+                const err = await res.json();
+                toast.error(err.detail || 'Failed to reject proposal.');
+            }
+        } catch (e) {
+            toast.error('Internal connection error during rejection stage.');
+        }
+    };
+
     return (
         <div className="flex-1 flex flex-col bg-white border border-border rounded-2xl overflow-hidden shadow-sm h-full">
             {/* Messages Body */}
@@ -617,14 +665,14 @@ export default function ChatPanel({
                                                             >
                                                                 Confirm Action
                                                             </button>
-                                                            {/* <button
+                                                            <button
                                                                 onClick={() => {
-                                                                    toast.info('Proposal rejected locally.');
+                                                                    handleRejectAction(parsed.proposal_id, m.id);
                                                                 }}
                                                                 className="px-3 py-1.5 bg-white border border-border text-slate-600 hover:text-slate-900 text-xs rounded transition-colors cursor-pointer"
                                                             >
                                                                 Reject
-                                                            </button> */}
+                                                            </button>
                                                         </div>
                                                     )}
                                                 </div>

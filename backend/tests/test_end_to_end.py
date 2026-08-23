@@ -50,6 +50,43 @@ def test_full_customer_propose_confirm_flow(client, db_session):
     assert order.status == "CANCELLED"
     assert order.cancellation_requested_at is not None
 
+
+def test_full_customer_propose_reject_flow(client, db_session):
+    # 1. Login as Northstar Customer
+    login_resp = client.post("/auth/mock-login", json={
+        "email": "northstar@parcelpilot.ai",
+        "password": "password123"
+    })
+    assert login_resp.status_code == 200
+    token = login_resp.json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # 2. Create a proposal for cancellation
+    from app.tools.actions import propose_action
+    from app.db.models import User
+    
+    user = db_session.query(User).filter(User.user_id == "cust-northstar").first()
+    prop_data = propose_action(
+        db=db_session,
+        user=user,
+        action_type="CANCEL_ORDER",
+        order_id="ORD-102",
+        reason="Requested cancel in chat"
+    )
+    assert prop_data["action_type"] == "CANCEL_ORDER"
+    proposal_id = prop_data["proposal_id"]
+
+    # 3. Reject proposal
+    reject_resp = client.post("/chat/reject", json={"proposal_id": proposal_id}, headers=headers)
+    assert reject_resp.status_code == 200
+    assert reject_resp.json()["success"] is True
+    assert reject_resp.json()["action"]["status"] == "REJECTED"
+
+    # 4. Check order status in DB (should NOT be cancelled)
+    order = db_session.query(Order).filter(Order.order_id == "ORD-102").first()
+    assert order.status != "CANCELLED"
+
+
 def test_full_support_insights_aggregate_flow(client):
     # 1. Login as Support Agent Maya
     login_resp = client.post("/auth/mock-login", json={
