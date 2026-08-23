@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import parcelPilotLogo from '../../assets/parcelpilot.png';
-import { Button, TextInput } from '../ui';
+import { Button, TextInput, Spinner } from '../ui';
 
 interface LoginPageProps {
     API_URL: string;
@@ -14,11 +14,13 @@ export default function LoginPage({ API_URL, setToken, setRefreshToken, setUser 
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [loginError, setLoginError] = useState('');
+    const [isLoading, setIsLoading] = useState(false);
     const navigate = useNavigate();
 
     const handleLogin = async (e?: React.FormEvent, customUser?: any) => {
         if (e) e.preventDefault();
         setLoginError('');
+        setIsLoading(true);
 
         const loginEmail = customUser ? customUser.email : email;
         const loginPassword = customUser ? customUser.password : password;
@@ -46,6 +48,8 @@ export default function LoginPage({ API_URL, setToken, setRefreshToken, setUser 
             }
         } catch (err) {
             setLoginError('Backend connection error. Make sure FastAPI server is running.');
+        } finally {
+            setIsLoading(false);
         }
     };
 
@@ -103,9 +107,10 @@ export default function LoginPage({ API_URL, setToken, setRefreshToken, setUser 
                     <Button
                         type="submit"
                         variant="primary"
-                        className="w-full text-xs font-black uppercase tracking-widest bg-emerald-600 hover:bg-emerald-700 text-white"
+                        disabled={isLoading}
+                        className="w-full text-xs font-black uppercase tracking-widest bg-emerald-600 hover:bg-emerald-700 text-white flex items-center justify-center gap-2"
                     >
-                        Sign In
+                        {isLoading ? <Spinner className="h-4 w-4 animate-spin text-white" /> : 'Sign In'}
                     </Button>
                 </form>
 
