@@ -33,3 +33,7 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 # Express in tz-aware format for calculations
 IST_TZ = timezone(timedelta(hours=5, minutes=30))
 SNAPSHOT_DATETIME = datetime(2026, 8, 16, 11, 0, 0, tzinfo=IST_TZ)
+
+# CORS Origins
+ALLOWED_ORIGINS_STR = os.getenv("ALLOWED_ORIGINS", "http://localhost:5173,http://localhost:3000,http://127.0.0.1:5173,http://127.0.0.1:3000")
+ALLOWED_ORIGINS = [origin.strip() for origin in ALLOWED_ORIGINS_STR.split(",") if origin.strip()]
