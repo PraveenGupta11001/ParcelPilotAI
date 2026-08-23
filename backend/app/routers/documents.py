@@ -170,6 +170,38 @@ def list_uploaded_documents(
         for r in results
     ]
 
+
+@router.delete("/uploaded-documents/{filename}", status_code=status.HTTP_200_OK)
+def delete_document(
+    filename: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Deletes a document (all its chunks) from the database context.
+    Enforces scope-based security permissions for customers vs internal support.
+    """
+    chunks = db.query(DocumentChunk).filter(DocumentChunk.document_name == filename).all()
+    if not chunks:
+        raise HTTPException(status_code=404, detail="Document not found.")
+
+    for c in chunks:
+        if current_user.role == "customer":
+            if c.scope != current_user.account_id:
+                raise HTTPException(
+                    status_code=403,
+                    detail="Access denied: Customers can only delete documents scoped to their own account."
+                )
+
+    # Perform chunk deletion
+    db.query(DocumentChunk).filter(DocumentChunk.document_name == filename).delete()
+    db.commit()
+
+    return {
+        "success": True,
+        "message": f"Successfully deleted document '{filename}' from database."
+    }
+
+
 @router.get("/uploaded-documents/{filename}")
 def get_uploaded_document_content(
     filename: str,

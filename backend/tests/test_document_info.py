@@ -1,3 +1,4 @@
+import json
 import pytest
 import datetime
 from app.db.models import User, DocumentChunk
@@ -101,3 +102,19 @@ def test_agent_run_tool_integration(db_session):
     assert isinstance(parsed_list, list)
     assert len(parsed_list) == 3
     assert "document_name" in parsed_list[0]
+
+
+def test_agent_run_tool_boolean_coercion(db_session):
+    agent_maya = db_session.query(User).filter(User.user_id == "agent-maya").first()
+    agent_service = AgentService(db=db_session, user=agent_maya)
+
+    # Call with "false" string, should coerce to False and should still run successfully
+    count_res_false = agent_service.run_tool("get_document_count", {"include_deprecated": "false"})
+    parsed_count_false = json.loads(count_res_false)
+    assert "total_documents" in parsed_count_false
+
+    # Call with "True" string, should coerce to True and should run successfully
+    count_res_true = agent_service.run_tool("get_document_count", {"include_deprecated": "True"})
+    parsed_count_true = json.loads(count_res_true)
+    assert "total_documents" in parsed_count_true
+

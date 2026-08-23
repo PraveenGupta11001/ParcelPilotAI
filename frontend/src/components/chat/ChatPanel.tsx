@@ -378,7 +378,7 @@ export default function ChatPanel({
                             className={`flex flex-col max-w-[85%] relative group ${m.role === 'user' ? 'ml-auto items-end' : 'mr-auto items-start'}`}
                         >
                             <div
-                                className={`px-4 py-3.5 rounded-2xl text-base leading-relaxed ${m.role === 'user'
+                                className={`relative px-4 py-3.5 rounded-2xl text-base leading-relaxed ${m.role === 'user'
                                     ? 'bg-emerald-650 text-slate-800 font-bold rounded-tr-none'
                                     : msgText.startsWith('⚠️')
                                         ? 'bg-rose-50 border border-rose-250 text-rose-950 rounded-tl-none shadow-sm shadow-rose-100/50'

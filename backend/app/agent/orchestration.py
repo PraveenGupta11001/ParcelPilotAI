@@ -54,6 +54,12 @@ class AgentService:
         Executes a database tool securely inside the verified user workspace.
         Appends tool events to agent execution traces and persists inside AuditLogs.
         """
+        # Coerce include_deprecated from potential string to boolean
+        if isinstance(arguments, dict) and "include_deprecated" in arguments:
+            val = arguments["include_deprecated"]
+            if isinstance(val, str):
+                arguments["include_deprecated"] = (val.lower() == "true")
+
         output = ""
         try:
             if tool_name == "search_documents":

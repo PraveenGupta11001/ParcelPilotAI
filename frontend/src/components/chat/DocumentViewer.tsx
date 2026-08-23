@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Upload, FileText, X, Search, ShieldAlert, Eye, Download } from 'lucide-react';
-import { Button, Select, Spinner, Modal } from '../ui';
+import { Upload, FileText, X, Search, ShieldAlert, Eye, Download, Trash2 } from 'lucide-react';
+import { Button, Select, Spinner, Modal, ConfirmDialog } from '../ui';
 import { toast } from 'sonner';
 
 interface DocumentViewerProps {
@@ -24,6 +24,9 @@ export default function DocumentViewer({ API_URL, token, user, onClose }: Docume
     const [pdfUrl, setPdfUrl] = useState<string | null>(null);
     const [pdfModalOpen, setPdfModalOpen] = useState(false);
     const [loadingPdf, setLoadingPdf] = useState(false);
+    const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+    const [docToDelete, setDocToDelete] = useState<string | null>(null);
+    const [deleting, setDeleting] = useState(false);
 
     useEffect(() => {
         fetchDocuments();
@@ -101,6 +104,42 @@ export default function DocumentViewer({ API_URL, token, user, onClose }: Docume
             toast.error('This uploaded file does not have a physical PDF on the server (text chunks only). Showing content outline only.');
         } finally {
             setLoadingPdf(false);
+        }
+    };
+
+    const handleDeleteClick = (filename: string) => {
+        setDocToDelete(filename);
+        setDeleteConfirmOpen(true);
+    };
+
+    const handleConfirmDelete = async () => {
+        if (!docToDelete) return;
+        setDeleting(true);
+        try {
+            const res = await fetch(`${API_URL}/uploaded-documents/${encodeURIComponent(docToDelete)}`, {
+                method: 'DELETE',
+                headers: {
+                    'Authorization': `Bearer ${token}`
+                }
+            });
+
+            if (res.ok) {
+                toast.success(`Successfully deleted document "${docToDelete}"`);
+                if (selectedDoc?.filename === docToDelete) {
+                    setSelectedDoc(null);
+                }
+                setDeleteConfirmOpen(false);
+                setDocToDelete(null);
+                fetchDocuments();
+            } else {
+                const err = await res.json();
+                toast.error(err.detail || 'Failed to delete document.');
+            }
+        } catch (e) {
+            console.error('Delete request error', e);
+            toast.error('Connection error during deletion.');
+        } finally {
+            setDeleting(false);
         }
     };
 
@@ -278,22 +317,38 @@ export default function DocumentViewer({ API_URL, token, user, onClose }: Docume
 
                     <div className="space-y-1.5 max-h-[160px] overflow-y-auto pr-1">
                         {filteredDocs.map((doc) => (
-                            <button
+                            <div
                                 key={doc.filename}
-                                onClick={() => handleDocClick(doc.filename)}
-                                className={`w-full flex items-center justify-between p-2.5 rounded-xl border text-left transition text-xs font-bold cursor-pointer ${selectedDoc?.filename === doc.filename
-                                    ? 'bg-emerald-50/70 border-emerald-300 text-emerald-800 hover:bg-emerald-50'
+                                className={`w-full flex items-center justify-between p-2 rounded-xl border transition text-xs font-bold ${selectedDoc?.filename === doc.filename
+                                    ? 'bg-emerald-50/70 border-emerald-300 text-emerald-800'
                                     : 'bg-white border-border text-slate-700 hover:bg-slate-50'
                                     }`}
                             >
-                                <div className="flex items-center space-x-2 truncate">
+                                <button
+                                    onClick={() => handleDocClick(doc.filename)}
+                                    className="flex-1 flex items-center space-x-2 truncate text-left cursor-pointer p-0.5"
+                                >
                                     <FileText className="h-4 w-4 shrink-0 text-slate-400" />
                                     <span className="truncate">{doc.filename}</span>
+                                </button>
+                                <div className="flex items-center space-x-1.5 shrink-0 ml-1">
+                                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-100 border border-slate-200 text-slate-500 uppercase tracking-wider select-none">
+                                        {doc.scope}
+                                    </span>
+                                    {(user?.role !== 'customer' || doc.scope === user?.account_id) && (
+                                        <button
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                handleDeleteClick(doc.filename);
+                                            }}
+                                            className="text-slate-400 hover:text-red-650 hover:bg-red-50 p-1 rounded transition cursor-pointer"
+                                            title="Delete Document"
+                                        >
+                                            <Trash2 className="h-3.5 w-3.5" />
+                                        </button>
+                                    )}
                                 </div>
-                                <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-100 border border-slate-200 text-slate-500 uppercase tracking-wider shrink-0 select-none">
-                                    {doc.scope}
-                                </span>
-                            </button>
+                            </div>
                         ))}
 
                         {!loadingDocs && filteredDocs.length === 0 && (
@@ -353,6 +408,15 @@ export default function DocumentViewer({ API_URL, token, user, onClose }: Docume
                                         <Download className="h-3.5 w-3.5" />
                                         Download
                                     </Button>
+                                    {(user?.role !== 'customer' || selectedDoc.scope === user?.account_id) && (
+                                        <Button
+                                            onClick={() => handleDeleteClick(selectedDoc.filename)}
+                                            className="flex-1 text-[10px] text-slate-400 font-black uppercase tracking-wider py-1.5 flex items-center justify-center gap-1 bg-red-650 hover:bg-red-700 text-slate-600 hover:text-white cursor-pointer"
+                                        >
+                                            <Trash2 className="h-3.5 w-3.5" />
+                                            Delete
+                                        </Button>
+                                    )}
                                 </div>
                             </div>
                             <div className="border-t border-border pt-3">
@@ -397,6 +461,23 @@ export default function DocumentViewer({ API_URL, token, user, onClose }: Docume
                     )}
                 </div>
             </Modal>
+
+            <ConfirmDialog
+                open={deleteConfirmOpen}
+                onClose={() => {
+                    if (!deleting) {
+                        setDeleteConfirmOpen(false);
+                        setDocToDelete(null);
+                    }
+                }}
+                onConfirm={handleConfirmDelete}
+                title="Delete Document"
+                description={`Are you sure you want to permanently delete "${docToDelete || ''}" from the system? This action cannot be undone and will remove it from the semantic search index.`}
+                confirmLabel="Delete"
+                cancelLabel="Cancel"
+                variant="danger"
+                loading={deleting}
+            />
         </div>
     );
 }

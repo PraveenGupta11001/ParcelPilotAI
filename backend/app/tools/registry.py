@@ -15,7 +15,7 @@ TOOLS_DEFINITION = [
                     "description": "Natural language search query containing keywords or problem descriptions."
                 },
                 "include_deprecated": {
-                    "type": "boolean",
+                    "type": ["boolean", "string"],
                     "description": "Whether to search historical and deprecated policies (internal users only). Defaults to False."
                 }
             },
@@ -107,7 +107,7 @@ TOOLS_DEFINITION = [
             "type": "object",
             "properties": {
                 "include_deprecated": {
-                    "type": "boolean",
+                    "type": ["boolean", "string"],
                     "description": "Whether to include historical or deprecated documents. Defaults to False."
                 }
             }
@@ -123,7 +123,7 @@ TOOLS_DEFINITION = [
             "type": "object",
             "properties": {
                 "include_deprecated": {
-                    "type": "boolean",
+                    "type": ["boolean", "string"],
                     "description": "Whether to include historical or deprecated documents. Defaults to False."
                 }
             }
