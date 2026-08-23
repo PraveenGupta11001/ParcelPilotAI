@@ -205,6 +205,13 @@ class AgentService:
                 "model": "gemini-2.5-flash",
                 "name": "Gemini Backup"
             })
+        if self.openai_key:
+            options.append({
+                "api_key": self.openai_key,
+                "base_url": "https://api.openai.com/v1",
+                "model": "gpt-4o-mini",
+                "name": "OpenAI Backup"
+            })
 
         if not options:
             if self.anthropic_key:
@@ -491,6 +498,13 @@ class AgentService:
                 "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
                 "model": "gemini-2.5-flash",
                 "name": "Gemini Backup"
+            })
+        if self.openai_key:
+            options.append({
+                "api_key": self.openai_key,
+                "base_url": "https://api.openai.com/v1",
+                "model": "gpt-4o-mini",
+                "name": "OpenAI Backup"
             })
 
         if not options:
